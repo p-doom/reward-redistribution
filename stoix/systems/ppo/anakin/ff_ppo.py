@@ -137,7 +137,7 @@ def get_learner_fn(
         # If autoresetting is disabled, we nullify dones, values, rewards, and log_probs after end of episode
         if config.env.kwargs.get("disable_autoreset", False):
             traj_batch = traj_batch._replace(
-                done=jnp.where(post_episode_mask, False, traj_batch.done),
+                done=jnp.where(post_episode_mask, True, traj_batch.done),
                 value=jnp.where(post_episode_mask, 0.0, traj_batch.value),
                 reward=jnp.where(post_episode_mask, 0.0, traj_batch.reward),
                 log_prob=jnp.where(post_episode_mask, 0.0, traj_batch.log_prob),
