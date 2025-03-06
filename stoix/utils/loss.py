@@ -32,6 +32,27 @@ def ppo_clip_loss(
     return loss_actor
 
 
+def ppo_masked_clip_loss(
+    pi_log_prob_t: chex.Array, b_pi_log_prob_t: chex.Array, gae_t: chex.Array, epsilon: float, episode_mask: chex.Array
+) -> chex.Array:
+    ratio = jnp.exp(pi_log_prob_t - b_pi_log_prob_t)
+    loss_actor1 = ratio * gae_t
+    loss_actor2 = (
+        jnp.clip(
+            ratio,
+            1.0 - epsilon,
+            1.0 + epsilon,
+        )
+        * gae_t
+    )
+    loss_actor = -jnp.minimum(loss_actor1, loss_actor2)
+
+    masked_loss_actor = loss_actor * episode_mask
+
+    loss_actor = masked_loss_actor.mean()
+    return loss_actor
+
+
 def ppo_penalty_loss(
     pi_log_prob_t: chex.Array,
     b_pi_log_prob_t: chex.Array,
@@ -74,6 +95,23 @@ def clipped_value_loss(
     value_losses = jnp.square(pred_value_t - targets_t)
     value_losses_clipped = jnp.square(value_pred_clipped - targets_t)
     value_loss = 0.5 * jnp.maximum(value_losses, value_losses_clipped).mean()
+
+    return value_loss
+
+
+def clipped_masked_value_loss(
+    pred_value_t: chex.Array, behavior_value_t: chex.Array, targets_t: chex.Array, epsilon: float, episode_mask: chex.Array
+) -> chex.Array:
+    value_pred_clipped = behavior_value_t + (pred_value_t - behavior_value_t).clip(
+        -epsilon, epsilon
+    )
+    value_losses = jnp.square(pred_value_t - targets_t)
+    value_losses_clipped = jnp.square(value_pred_clipped - targets_t)
+
+    masked_value_losses = value_losses * episode_mask
+    masked_value_losses_clipped = value_losses_clipped * episode_mask
+
+    value_loss = 0.5 * jnp.maximum(masked_value_losses, masked_value_losses_clipped).mean()
 
     return value_loss
 

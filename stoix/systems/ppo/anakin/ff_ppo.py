@@ -35,7 +35,7 @@ from stoix.utils.jax_utils import (
     unreplicate_n_dims,
 )
 from stoix.utils.logger import LogEvent, StoixLogger
-from stoix.utils.loss import clipped_value_loss, ppo_clip_loss
+from stoix.utils.loss import clipped_value_loss, clipped_masked_value_loss, ppo_clip_loss, ppo_masked_clip_loss
 from stoix.utils.multistep import batch_truncated_generalized_advantage_estimation, batch_truncated_monte_carlo_return_advantage
 from stoix.utils.total_timestep_checker import check_total_timesteps
 from stoix.utils.training import make_learning_rate
@@ -230,9 +230,16 @@ def get_learner_fn(
                     log_prob = actor_policy.log_prob(traj_batch.action)
 
                     # CALCULATE ACTOR LOSS
-                    loss_actor = ppo_clip_loss(
-                        log_prob, traj_batch.log_prob, gae, config.system.clip_eps
+                    loss_actor = jax.lax.cond(
+                        config.env.kwargs.get("disable_autoreset", False),
+                        ppo_masked_clip_loss(
+                            log_prob, traj_batch.log_prob, gae, config.system.clip_eps, episode_mask
+                        ),
+                        ppo_clip_loss(
+                            log_prob, traj_batch.log_prob, gae, config.system.clip_eps
+                        ),
                     )
+                    # FIXME: Entropy calculation should not use post-episode transitions
                     entropy = actor_policy.entropy().mean()
 
                     total_loss_actor = loss_actor - config.system.ent_coef * entropy
@@ -252,8 +259,14 @@ def get_learner_fn(
                     value = critic_apply_fn(critic_params, traj_batch.obs)
 
                     # CALCULATE VALUE LOSS
-                    value_loss = clipped_value_loss(
-                        value, traj_batch.value, targets, config.system.clip_eps
+                    value_loss = jax.lax.cond(
+                        config.env.kwargs.get("disable_autoreset", False),
+                        clipped_masked_value_loss(
+                            value, traj_batch.value, targets, config.system.clip_eps, episode_mask
+                        ),
+                        clipped_value_loss(
+                            value, traj_batch.value, targets, config.system.clip_eps
+                        )
                     )
 
                     critic_total_loss = config.system.vf_coef * value_loss
