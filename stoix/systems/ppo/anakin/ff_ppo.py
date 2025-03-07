@@ -232,10 +232,10 @@ def get_learner_fn(
                     # CALCULATE ACTOR LOSS
                     loss_actor = jax.lax.cond(
                         config.env.kwargs.get("disable_autoreset", False),
-                        ppo_masked_clip_loss(
+                        lambda: ppo_masked_clip_loss(
                             log_prob, traj_batch.log_prob, gae, config.system.clip_eps, episode_mask
                         ),
-                        ppo_clip_loss(
+                        lambda: ppo_clip_loss(
                             log_prob, traj_batch.log_prob, gae, config.system.clip_eps
                         ),
                     )
@@ -261,10 +261,10 @@ def get_learner_fn(
                     # CALCULATE VALUE LOSS
                     value_loss = jax.lax.cond(
                         config.env.kwargs.get("disable_autoreset", False),
-                        clipped_masked_value_loss(
+                        lambda: clipped_masked_value_loss(
                             value, traj_batch.value, targets, config.system.clip_eps, episode_mask
                         ),
-                        clipped_value_loss(
+                        lambda: clipped_value_loss(
                             value, traj_batch.value, targets, config.system.clip_eps
                         )
                     )
