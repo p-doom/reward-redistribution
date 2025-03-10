@@ -280,13 +280,13 @@ def get_learner_fn(
                 # CALCULATE ACTOR LOSS
                 actor_grad_fn = jax.grad(_actor_loss_fn, has_aux=True)
                 actor_grads, actor_loss_info = actor_grad_fn(
-                    params.actor_params, traj_batch, advantages, episode_mask # TODO mihir check
+                    params.actor_params, traj_batch, advantages, episode_mask 
                 )
 
                 # CALCULATE CRITIC LOSS
                 critic_grad_fn = jax.grad(_critic_loss_fn, has_aux=True)
                 critic_grads, critic_loss_info = critic_grad_fn(
-                    params.critic_params, traj_batch, targets, episode_mask # TODO mihir check
+                    params.critic_params, traj_batch, targets, episode_mask 
                 )
 
                 # Compute the parallel mean (pmean) over the batch.
@@ -332,13 +332,13 @@ def get_learner_fn(
                 }
                 return (new_params, new_opt_state), loss_info
 
-            params, opt_states, traj_batch, advantages, targets, key = update_state
+            params, opt_states, traj_batch, advantages, targets, episode_mask, key = update_state
             key, shuffle_key = jax.random.split(key)
 
             # SHUFFLE MINIBATCHES
             batch_size = config.system.rollout_length * config.arch.num_envs
             permutation = jax.random.permutation(shuffle_key, batch_size)
-            batch = (traj_batch, advantages, targets, episode_mask) # TODO mihir check
+            batch = (traj_batch, advantages, targets, episode_mask) 
             batch = jax.tree_util.tree_map(lambda x: merge_leading_dims(x, 2), batch)
             shuffled_batch = jax.tree_util.tree_map(
                 lambda x: jnp.take(x, permutation, axis=0), batch
@@ -353,17 +353,17 @@ def get_learner_fn(
                 _update_minibatch, (params, opt_states), minibatches
             )
 
-            update_state = (params, opt_states, traj_batch, advantages, targets, key)
+            update_state = (params, opt_states, traj_batch, advantages, targets, episode_mask, key)
             return update_state, loss_info
 
-        update_state = (params, opt_states, traj_batch, advantages, targets, key)
+        update_state = (params, opt_states, traj_batch, advantages, targets, episode_mask, key)
 
         # UPDATE EPOCHS
         update_state, loss_info = jax.lax.scan(
             _update_epoch, update_state, None, config.system.epochs
         )
 
-        params, opt_states, traj_batch, advantages, targets, key = update_state
+        params, opt_states, traj_batch, advantages, targets, episode_mask, key = update_state
         learner_state = OnPolicyLearnerState(params, opt_states, key, env_state, last_timestep)
         metric = traj_batch.info
         return learner_state, (metric, loss_info)
