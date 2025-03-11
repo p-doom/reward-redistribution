@@ -217,13 +217,13 @@ def get_learner_fn(
 
                 # UNPACK TRAIN STATE AND BATCH INFO
                 params, opt_states = train_state
-                traj_batch, advantages, targets, episode_mask = batch_info
+                traj_batch, advantages, targets, episode_mask_minibatch = batch_info
 
                 def _actor_loss_fn(
                     actor_params: FrozenDict,
                     traj_batch: PPOTransition,
                     gae: chex.Array,
-                    episode_mask: chex.Array
+                    ep_mask: chex.Array
                 ) -> Tuple:
                     """Calculate the actor loss."""
                     # RERUN NETWORK
@@ -234,7 +234,7 @@ def get_learner_fn(
                     loss_actor = jax.lax.cond(
                         config.env.kwargs.get("disable_autoreset", False),
                         lambda: ppo_masked_clip_loss(
-                            log_prob, traj_batch.log_prob, gae, config.system.clip_eps, episode_mask
+                            log_prob, traj_batch.log_prob, gae, config.system.clip_eps, ep_mask
                         ),
                         lambda: ppo_clip_loss(
                             log_prob, traj_batch.log_prob, gae, config.system.clip_eps
@@ -254,7 +254,7 @@ def get_learner_fn(
                     critic_params: FrozenDict,
                     traj_batch: PPOTransition,
                     targets: chex.Array,
-                    episode_mask: chex.Array
+                    ep_mask: chex.Array
                 ) -> Tuple:
                     """Calculate the critic loss."""
                     # RERUN NETWORK
@@ -264,7 +264,7 @@ def get_learner_fn(
                     value_loss = jax.lax.cond(
                         config.env.kwargs.get("disable_autoreset", False),
                         lambda: clipped_masked_value_loss(
-                            value, traj_batch.value, targets, config.system.clip_eps, episode_mask
+                            value, traj_batch.value, targets, config.system.clip_eps, ep_mask
                         ),
                         lambda: clipped_value_loss(
                             value, traj_batch.value, targets, config.system.clip_eps
@@ -280,13 +280,13 @@ def get_learner_fn(
                 # CALCULATE ACTOR LOSS
                 actor_grad_fn = jax.grad(_actor_loss_fn, has_aux=True)
                 actor_grads, actor_loss_info = actor_grad_fn(
-                    params.actor_params, traj_batch, advantages, episode_mask 
+                    params.actor_params, traj_batch, advantages, episode_mask_minibatch 
                 )
 
                 # CALCULATE CRITIC LOSS
                 critic_grad_fn = jax.grad(_critic_loss_fn, has_aux=True)
                 critic_grads, critic_loss_info = critic_grad_fn(
-                    params.critic_params, traj_batch, targets, episode_mask 
+                    params.critic_params, traj_batch, targets, episode_mask_minibatch
                 )
 
                 # Compute the parallel mean (pmean) over the batch.
@@ -332,13 +332,13 @@ def get_learner_fn(
                 }
                 return (new_params, new_opt_state), loss_info
 
-            params, opt_states, traj_batch, advantages, targets, episode_mask, key = update_state
+            params, opt_states, traj_batch, advantages, targets, episode_mask_epoch, key = update_state
             key, shuffle_key = jax.random.split(key)
 
             # SHUFFLE MINIBATCHES
             batch_size = config.system.rollout_length * config.arch.num_envs
             permutation = jax.random.permutation(shuffle_key, batch_size)
-            batch = (traj_batch, advantages, targets, episode_mask) 
+            batch = (traj_batch, advantages, targets, episode_mask_epoch) 
             batch = jax.tree_util.tree_map(lambda x: merge_leading_dims(x, 2), batch)
             shuffled_batch = jax.tree_util.tree_map(
                 lambda x: jnp.take(x, permutation, axis=0), batch
@@ -353,7 +353,7 @@ def get_learner_fn(
                 _update_minibatch, (params, opt_states), minibatches
             )
 
-            update_state = (params, opt_states, traj_batch, advantages, targets, episode_mask, key)
+            update_state = (params, opt_states, traj_batch, advantages, targets, episode_mask_epoch, key)
             return update_state, loss_info
 
         update_state = (params, opt_states, traj_batch, advantages, targets, episode_mask, key)
