@@ -128,32 +128,24 @@ def get_learner_fn(
             _env_step, learner_state, None, config.system.rollout_length
         )
 
-        trajectory_length = traj_batch.done.shape[0] # type: ignore
-
-        # For each trajectory (axis=1), find the episode ending (first of either done_- or truncation_index along time dimension (axis=0))
-        done_indices = jnp.argmax(traj_batch.done, axis=0)  # shape: (num_trajectories,)
-        done_indices = jnp.where(jnp.any(traj_batch.done, axis=0), done_indices, trajectory_length)
-        truncation_indices = jnp.argmax(traj_batch.truncated, axis=0) # shape: (num_trajectories,)
-        truncation_indices = jnp.where(jnp.any(traj_batch.truncated, axis=0), truncation_indices, trajectory_length)
-        episode_termination_indices = jnp.minimum(done_indices, truncation_indices)
-
-        # Create mask for non-valid transitions (time > done_index for each trajectory)
-        time_indices = jnp.arange(traj_batch.done.shape[0])[:, jnp.newaxis]  # (num_timesteps, 1)
-        post_episode_mask = time_indices > episode_termination_indices[jnp.newaxis, :]  # Mask for steps after episode ends
-        episode_mask = jnp.logical_not(post_episode_mask)  # (num_timesteps, num_trajectories)
+        # FIXME: Uncommenting `post_episode_mask` leads to the ptxas error when a `jax.debug.breakpoint()` is set, even though
+        # the variable is unused. Run using the following command to reproduce:
+        # `python3 stoix/systems/ppo/anakin/ff_ppo.py env=navix/four_rooms_7x7 system.redistribute_reward=false system.disable_autoreset=false env.kwargs.disable_autoreset=false`
+        # post_episode_mask = jnp.arange(traj_batch.done.shape[0])[:, jnp.newaxis] > jnp.minimum(jnp.where(jnp.any(traj_batch.done, axis=0) ,jnp.argmax(traj_batch.done, axis=0), traj_batch.done.shape[0]), jnp.where(jnp.any(traj_batch.truncated, axis=0), jnp.argmax(traj_batch.truncated, axis=0), traj_batch.done.shape[0]))[jnp.newaxis, :]  # Mask for steps after episode ends
+        jax.debug.breakpoint()
 
         # If autoresetting is disabled, we nullify dones, values, rewards, and log_probs after end of episode
         # FIXME: This is only navix-level. Assuming that most environments do not autoreset, we should make system.disable_autoreset
         # the ground-truth
         if config.env.kwargs.get("disable_autoreset", False):
-            episode_dones = jnp.where(episode_mask, traj_batch.done, False)
-            new_dones = jnp.where(jnp.any(episode_dones, axis=0), time_indices >= done_indices[jnp.newaxis, :], jnp.array(False))
-            new_truncations = jnp.where(jnp.any(traj_batch.truncated, axis=0), time_indices >= truncation_indices[jnp.newaxis, :], jnp.array(False))
+            episode_dones = jnp.where(jnp.logical_not(jnp.arange(traj_batch.done.shape[0])[:, jnp.newaxis] > jnp.minimum(jnp.where(jnp.any(traj_batch.done, axis=0) ,jnp.argmax(traj_batch.done, axis=0), traj_batch.done.shape[0]), jnp.where(jnp.any(traj_batch.truncated, axis=0), jnp.argmax(traj_batch.truncated, axis=0), traj_batch.done.shape[0]))[jnp.newaxis, :]), traj_batch.done, False)
+            new_dones = jnp.where(jnp.any(episode_dones, axis=0), jnp.arange(traj_batch.done.shape[0])[:, jnp.newaxis] >= jnp.where(jnp.any(traj_batch.done, axis=0) ,jnp.argmax(traj_batch.done, axis=0), traj_batch.done.shape[0])[jnp.newaxis, :], jnp.array(False))
+            new_truncations = jnp.where(jnp.any(traj_batch.truncated, axis=0), jnp.arange(traj_batch.done.shape[0])[:, jnp.newaxis] >= jnp.where(jnp.any(traj_batch.truncated, axis=0), jnp.argmax(traj_batch.truncated, axis=0), traj_batch.done.shape[0])[jnp.newaxis, :], jnp.array(False))
             traj_batch = traj_batch._replace(
                 done=new_dones,
                 truncated=new_truncations,
-                value=jnp.where(post_episode_mask, 0.0, traj_batch.value),
-                reward=jnp.where(post_episode_mask, 0.0, traj_batch.reward),
+                value=jnp.where(jnp.arange(traj_batch.done.shape[0])[:, jnp.newaxis] > jnp.minimum(jnp.where(jnp.any(traj_batch.done, axis=0) ,jnp.argmax(traj_batch.done, axis=0), traj_batch.done.shape[0]), jnp.where(jnp.any(traj_batch.truncated, axis=0), jnp.argmax(traj_batch.truncated, axis=0), traj_batch.done.shape[0]))[jnp.newaxis, :], 0.0, traj_batch.value),
+                reward=jnp.where(jnp.arange(traj_batch.done.shape[0])[:, jnp.newaxis] > jnp.minimum(jnp.where(jnp.any(traj_batch.done, axis=0) ,jnp.argmax(traj_batch.done, axis=0), traj_batch.done.shape[0]), jnp.where(jnp.any(traj_batch.truncated, axis=0), jnp.argmax(traj_batch.truncated, axis=0), traj_batch.done.shape[0]))[jnp.newaxis, :], 0.0, traj_batch.reward),
             )
 
         if config.system.redistribute_reward:
@@ -163,17 +155,17 @@ def get_learner_fn(
             # and will silently corrupt the reward structure otherwise
 
             # Episode lengths are index+1
-            episode_lengths = episode_termination_indices + 1  # shape: (num_trajectories,)
+            episode_lengths = jnp.minimum(jnp.where(jnp.any(traj_batch.done, axis=0) ,jnp.argmax(traj_batch.done, axis=0), traj_batch.done.shape[0]), jnp.where(jnp.any(traj_batch.truncated, axis=0), jnp.argmax(traj_batch.truncated, axis=0), traj_batch.done.shape[0])) + 1  # shape: (num_trajectories,)
             
             # Extract episodic reward (reward at last step for each trajectory)
-            episodic_reward = traj_batch.reward[episode_termination_indices, jnp.arange(traj_batch.reward.shape[1])]  # shape: (num_trajectories,)
+            episodic_reward = traj_batch.reward[jnp.minimum(jnp.where(jnp.any(traj_batch.done, axis=0) ,jnp.argmax(traj_batch.done, axis=0), traj_batch.done.shape[0]), jnp.where(jnp.any(traj_batch.truncated, axis=0), jnp.argmax(traj_batch.truncated, axis=0), traj_batch.done.shape[0])), jnp.arange(traj_batch.reward.shape[1])]  # shape: (num_trajectories,)
             
             # Compute normalized reward per trajectory
             normalized_reward = episodic_reward / episode_lengths  # shape: (num_trajectories,)
             
             # Broadcast normalized reward across time steps and apply mask
             new_reward = jnp.where(
-                episode_mask, 
+                jnp.logical_not(jnp.arange(traj_batch.done.shape[0])[:, jnp.newaxis] > jnp.minimum(jnp.where(jnp.any(traj_batch.done, axis=0) ,jnp.argmax(traj_batch.done, axis=0), traj_batch.done.shape[0]), jnp.where(jnp.any(traj_batch.truncated, axis=0), jnp.argmax(traj_batch.truncated, axis=0), traj_batch.done.shape[0]))[jnp.newaxis, :]), 
                 normalized_reward[None, :],  # (1, num_trajectories)
                 0
             )  # (num_timesteps, num_trajectories)
@@ -184,7 +176,7 @@ def get_learner_fn(
         params, opt_states, key, env_state, last_timestep = learner_state
 
         if config.env.kwargs.get("disable_autoreset", False):
-            last_val = jnp.zeros_like(episode_termination_indices)
+            last_val = jnp.zeros_like(jnp.minimum(jnp.where(jnp.any(traj_batch.done, axis=0) ,jnp.argmax(traj_batch.done, axis=0), traj_batch.done.shape[0]), jnp.where(jnp.any(traj_batch.truncated, axis=0), jnp.argmax(traj_batch.truncated, axis=0), traj_batch.done.shape[0])))
         else:
             last_val = critic_apply_fn(params.critic_params, last_timestep.observation)
 
