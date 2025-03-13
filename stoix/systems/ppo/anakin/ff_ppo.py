@@ -109,7 +109,7 @@ def get_learner_fn(
             return learner_state, transition
 
         # Explicitly reset the environment if autoresetting is disabled
-        if config.env.kwargs.get("disable_autoreset", False):
+        if config.env.kwargs.disable_autoreset:
             key, *env_keys = jax.random.split(
                 learner_state.key, config.arch.num_envs + 1
             )
@@ -145,7 +145,7 @@ def get_learner_fn(
         # If autoresetting is disabled, we nullify dones, values, rewards, and log_probs after end of episode
         # FIXME: This is only navix-level. Assuming that most environments do not autoreset, we should make system.disable_autoreset
         # the ground-truth
-        if config.env.kwargs.get("disable_autoreset", False):
+        if config.env.kwargs.disable_autoreset:
             episode_dones = jnp.where(episode_mask, traj_batch.done, False)
             new_dones = jnp.where(jnp.any(episode_dones, axis=0), time_indices >= done_indices[jnp.newaxis, :], jnp.array(False))
             # NOTE: We use `>` instead of `>=` since we would otherwise nullify the last delta of the episode in the GAE calculation
@@ -184,7 +184,7 @@ def get_learner_fn(
         # CALCULATE ADVANTAGE
         params, opt_states, key, env_state, last_timestep = learner_state
 
-        if config.env.kwargs.get("disable_autoreset", False):
+        if config.env.kwargs.disable_autoreset:
             last_val = jnp.zeros_like(episode_termination_indices)
         else:
             last_val = critic_apply_fn(params.critic_params, last_timestep.observation)
@@ -538,14 +538,14 @@ def run_experiment(_config: DictConfig) -> float:
             and not config.system.redistribute_reward_implicit
         )
         or (
-            config.system.get("disable_autoreset", False)
-            and config.env.kwargs.get("disable_autoreset", False)
+            config.system.disable_autoreset
+            and config.env.kwargs.disable_autoreset
         )
     ), """Reward redistribution currently only supports single episodes per rollout. Technically,
     only partial rollouts are problematic. If you need multi-episode support, please open an
     issue at https://github.com/p-doom/reward-redistribution."""
     assert (
-            config.system.get("disable_autoreset", False) == config.env.kwargs.get("disable_autoreset", False)
+            config.system.disable_autoreset == config.env.kwargs.disable_autoreset
     ), "Autoresetting must be disabled both at Stoix- and navix-level."
 
     # Create the environments for train and eval.
