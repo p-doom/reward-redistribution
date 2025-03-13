@@ -35,7 +35,7 @@ from stoix.utils.jax_utils import (
     unreplicate_n_dims,
 )
 from stoix.utils.logger import LogEvent, StoixLogger
-from stoix.utils.loss import clipped_value_loss, ppo_clip_loss
+from stoix.utils.loss import clipped_value_loss, clipped_masked_value_loss, ppo_clip_loss, ppo_masked_clip_loss
 from stoix.utils.multistep import batch_truncated_generalized_advantage_estimation, batch_truncated_monte_carlo_return_advantage
 from stoix.utils.total_timestep_checker import check_total_timesteps
 from stoix.utils.training import make_learning_rate
@@ -109,7 +109,7 @@ def get_learner_fn(
             return learner_state, transition
 
         # Explicitly reset the environment if autoresetting is disabled
-        if config.env.kwargs.get("disable_autoreset", False):
+        if config.env.kwargs.disable_autoreset:
             key, *env_keys = jax.random.split(
                 learner_state.key, config.arch.num_envs + 1
             )
@@ -145,7 +145,7 @@ def get_learner_fn(
         # If autoresetting is disabled, we nullify dones, values, rewards, and log_probs after end of episode
         # FIXME: This is only navix-level. Assuming that most environments do not autoreset, we should make system.disable_autoreset
         # the ground-truth
-        if config.env.kwargs.get("disable_autoreset", False):
+        if config.env.kwargs.disable_autoreset:
             episode_dones = jnp.where(episode_mask, traj_batch.done, False)
             new_dones = jnp.where(jnp.any(episode_dones, axis=0), time_indices >= done_indices[jnp.newaxis, :], jnp.array(False))
             new_truncations = jnp.where(jnp.any(traj_batch.truncated, axis=0), time_indices >= truncation_indices[jnp.newaxis, :], jnp.array(False))
@@ -183,7 +183,7 @@ def get_learner_fn(
         # CALCULATE ADVANTAGE
         params, opt_states, key, env_state, last_timestep = learner_state
 
-        if config.env.kwargs.get("disable_autoreset", False):
+        if config.env.kwargs.disable_autoreset:
             last_val = jnp.zeros_like(episode_termination_indices)
         else:
             last_val = critic_apply_fn(params.critic_params, last_timestep.observation)
@@ -217,12 +217,13 @@ def get_learner_fn(
 
                 # UNPACK TRAIN STATE AND BATCH INFO
                 params, opt_states = train_state
-                traj_batch, advantages, targets = batch_info
+                traj_batch, advantages, targets, episode_mask_minibatch = batch_info
 
                 def _actor_loss_fn(
                     actor_params: FrozenDict,
                     traj_batch: PPOTransition,
                     gae: chex.Array,
+                    ep_mask: chex.Array
                 ) -> Tuple:
                     """Calculate the actor loss."""
                     # RERUN NETWORK
@@ -230,9 +231,16 @@ def get_learner_fn(
                     log_prob = actor_policy.log_prob(traj_batch.action)
 
                     # CALCULATE ACTOR LOSS
-                    loss_actor = ppo_clip_loss(
-                        log_prob, traj_batch.log_prob, gae, config.system.clip_eps
+                    loss_actor = jax.lax.cond(
+                        config.env.kwargs.disable_autoreset,
+                        lambda: ppo_masked_clip_loss(
+                            log_prob, traj_batch.log_prob, gae, config.system.clip_eps, ep_mask
+                        ),
+                        lambda: ppo_clip_loss(
+                            log_prob, traj_batch.log_prob, gae, config.system.clip_eps
+                        ),
                     )
+                    # FIXME: Entropy calculation should not use post-episode transitions
                     entropy = actor_policy.entropy().mean()
 
                     total_loss_actor = loss_actor - config.system.ent_coef * entropy
@@ -246,14 +254,21 @@ def get_learner_fn(
                     critic_params: FrozenDict,
                     traj_batch: PPOTransition,
                     targets: chex.Array,
+                    ep_mask: chex.Array
                 ) -> Tuple:
                     """Calculate the critic loss."""
                     # RERUN NETWORK
                     value = critic_apply_fn(critic_params, traj_batch.obs)
 
                     # CALCULATE VALUE LOSS
-                    value_loss = clipped_value_loss(
-                        value, traj_batch.value, targets, config.system.clip_eps
+                    value_loss = jax.lax.cond(
+                        config.env.kwargs.disable_autoreset,
+                        lambda: clipped_masked_value_loss(
+                            value, traj_batch.value, targets, config.system.clip_eps, ep_mask
+                        ),
+                        lambda: clipped_value_loss(
+                            value, traj_batch.value, targets, config.system.clip_eps
+                        )
                     )
 
                     critic_total_loss = config.system.vf_coef * value_loss
@@ -265,13 +280,13 @@ def get_learner_fn(
                 # CALCULATE ACTOR LOSS
                 actor_grad_fn = jax.grad(_actor_loss_fn, has_aux=True)
                 actor_grads, actor_loss_info = actor_grad_fn(
-                    params.actor_params, traj_batch, advantages
+                    params.actor_params, traj_batch, advantages, episode_mask_minibatch 
                 )
 
                 # CALCULATE CRITIC LOSS
                 critic_grad_fn = jax.grad(_critic_loss_fn, has_aux=True)
                 critic_grads, critic_loss_info = critic_grad_fn(
-                    params.critic_params, traj_batch, targets
+                    params.critic_params, traj_batch, targets, episode_mask_minibatch
                 )
 
                 # Compute the parallel mean (pmean) over the batch.
@@ -317,13 +332,13 @@ def get_learner_fn(
                 }
                 return (new_params, new_opt_state), loss_info
 
-            params, opt_states, traj_batch, advantages, targets, key = update_state
+            params, opt_states, traj_batch, advantages, targets, episode_mask_epoch, key = update_state
             key, shuffle_key = jax.random.split(key)
 
             # SHUFFLE MINIBATCHES
             batch_size = config.system.rollout_length * config.arch.num_envs
             permutation = jax.random.permutation(shuffle_key, batch_size)
-            batch = (traj_batch, advantages, targets)
+            batch = (traj_batch, advantages, targets, episode_mask_epoch) 
             batch = jax.tree_util.tree_map(lambda x: merge_leading_dims(x, 2), batch)
             shuffled_batch = jax.tree_util.tree_map(
                 lambda x: jnp.take(x, permutation, axis=0), batch
@@ -338,17 +353,17 @@ def get_learner_fn(
                 _update_minibatch, (params, opt_states), minibatches
             )
 
-            update_state = (params, opt_states, traj_batch, advantages, targets, key)
+            update_state = (params, opt_states, traj_batch, advantages, targets, episode_mask_epoch, key)
             return update_state, loss_info
 
-        update_state = (params, opt_states, traj_batch, advantages, targets, key)
+        update_state = (params, opt_states, traj_batch, advantages, targets, episode_mask, key)
 
         # UPDATE EPOCHS
         update_state, loss_info = jax.lax.scan(
             _update_epoch, update_state, None, config.system.epochs
         )
 
-        params, opt_states, traj_batch, advantages, targets, key = update_state
+        params, opt_states, traj_batch, advantages, targets, episode_mask, key = update_state
         learner_state = OnPolicyLearnerState(params, opt_states, key, env_state, last_timestep)
         metric = traj_batch.info
         return learner_state, (metric, loss_info)
