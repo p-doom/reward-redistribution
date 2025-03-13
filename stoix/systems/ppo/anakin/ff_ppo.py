@@ -547,6 +547,10 @@ def run_experiment(_config: DictConfig) -> float:
     assert (
             config.system.disable_autoreset == config.env.kwargs.disable_autoreset
     ), "Autoresetting must be disabled both at Stoix- and navix-level."
+    assert (
+        config.system.disable_autoreset and config.env.kwargsdisable_autoreset
+    ), """Autoresetting is not supported any more due to bugs in the upstream implementation. Further
+    information is available at https://github.com/p-doom/reward-redistribution/pull/10."""
 
     # Create the environments for train and eval.
     env, eval_env = environments.make(config=config)
