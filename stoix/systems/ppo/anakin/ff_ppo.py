@@ -109,7 +109,7 @@ def get_learner_fn(
             return learner_state, transition
 
         # Explicitly reset the environment if autoresetting is disabled
-        if config.env.kwargs.get("disable_autoreset", False):
+        if config.env.kwargs.disable_autoreset:
             key, *env_keys = jax.random.split(
                 learner_state.key, config.arch.num_envs + 1
             )
@@ -145,7 +145,7 @@ def get_learner_fn(
         # If autoresetting is disabled, we nullify dones, values, rewards, and log_probs after end of episode
         # FIXME: This is only navix-level. Assuming that most environments do not autoreset, we should make system.disable_autoreset
         # the ground-truth
-        if config.env.kwargs.get("disable_autoreset", False):
+        if config.env.kwargs.disable_autoreset:
             episode_dones = jnp.where(episode_mask, traj_batch.done, False)
             new_dones = jnp.where(jnp.any(episode_dones, axis=0), time_indices >= done_indices[jnp.newaxis, :], jnp.array(False))
             new_truncations = jnp.where(jnp.any(traj_batch.truncated, axis=0), time_indices >= truncation_indices[jnp.newaxis, :], jnp.array(False))
@@ -183,7 +183,7 @@ def get_learner_fn(
         # CALCULATE ADVANTAGE
         params, opt_states, key, env_state, last_timestep = learner_state
 
-        if config.env.kwargs.get("disable_autoreset", False):
+        if config.env.kwargs.disable_autoreset:
             last_val = jnp.zeros_like(episode_termination_indices)
         else:
             last_val = critic_apply_fn(params.critic_params, last_timestep.observation)
@@ -232,7 +232,7 @@ def get_learner_fn(
 
                     # CALCULATE ACTOR LOSS
                     loss_actor = jax.lax.cond(
-                        config.env.kwargs.get("disable_autoreset", False),
+                        config.env.kwargs.disable_autoreset,
                         lambda: ppo_masked_clip_loss(
                             log_prob, traj_batch.log_prob, gae, config.system.clip_eps, ep_mask
                         ),
@@ -262,7 +262,7 @@ def get_learner_fn(
 
                     # CALCULATE VALUE LOSS
                     value_loss = jax.lax.cond(
-                        config.env.kwargs.get("disable_autoreset", False),
+                        config.env.kwargs.disable_autoreset,
                         lambda: clipped_masked_value_loss(
                             value, traj_batch.value, targets, config.system.clip_eps, ep_mask
                         ),
