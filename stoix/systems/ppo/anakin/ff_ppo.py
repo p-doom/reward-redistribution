@@ -148,6 +148,7 @@ def get_learner_fn(
         if config.env.kwargs.get("disable_autoreset", False):
             episode_dones = jnp.where(episode_mask, traj_batch.done, False)
             new_dones = jnp.where(jnp.any(episode_dones, axis=0), time_indices >= done_indices[jnp.newaxis, :], jnp.array(False))
+            # NOTE: We use `>` instead of `>=` since we would otherwise nullify the last delta of the episode in the GAE calculation
             new_truncations = jnp.where(jnp.any(traj_batch.truncated, axis=0), time_indices > truncation_indices[jnp.newaxis, :], jnp.array(False))
             traj_batch = traj_batch._replace(
                 done=new_dones,
