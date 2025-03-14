@@ -97,7 +97,8 @@ def make_gymnax_env(env_name: str, config: DictConfig) -> Tuple[Environment, Env
     env = GymnaxWrapper(env, env_params)
     eval_env = GymnaxWrapper(eval_env, eval_env_params)
 
-    env = AutoResetWrapper(env, next_obs_in_extras=True)
+    if not config.system.disable_autoreset:
+        env = AutoResetWrapper(env, next_obs_in_extras=True)
     env = RecordEpisodeMetrics(env)
 
     return env, eval_env
@@ -367,8 +368,7 @@ def make_navix_env(env_name: str, config: DictConfig) -> Tuple[Environment, Envi
     env = NavixWrapper(env)
     eval_env = NavixWrapper(eval_env)
 
-    disable_autoreset = config.system.get("disable_autoreset", False)
-    if not disable_autoreset:
+    if not config.system.disable_autoreset:
         env = AutoResetWrapper(env, next_obs_in_extras=True)
     env = RecordEpisodeMetrics(env)
 
