@@ -141,6 +141,7 @@ def get_learner_fn(
         time_indices = jnp.arange(traj_batch.done.shape[0])[:, jnp.newaxis]  # (num_timesteps, 1)
         post_episode_mask = time_indices > episode_termination_indices[jnp.newaxis, :]  # Mask for steps after episode ends
         episode_mask = jnp.logical_not(post_episode_mask)  # (num_timesteps, num_trajectories)
+        jax.debug.breakpoint()
 
         # If autoresetting is disabled, we nullify dones, values, rewards, and log_probs after end of episode
         # FIXME: This is only navix-level. Assuming that most environments do not autoreset, we should make system.disable_autoreset
