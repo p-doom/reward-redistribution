@@ -243,7 +243,6 @@ def get_learner_fn(
                     )
 
                     entropies = actor_policy.entropy()
-
                     entropies = jax.lax.cond(
                         config.env.kwargs.disable_autoreset,
                         lambda: entropies * ep_mask,
