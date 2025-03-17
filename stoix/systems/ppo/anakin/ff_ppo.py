@@ -248,7 +248,6 @@ def get_learner_fn(
                         config.env.kwargs.disable_autoreset,
                         lambda: entropies * ep_mask,
                         lambda: entropies  
-
                     )
                     entropy = entropies.mean()
 
