@@ -241,8 +241,14 @@ def get_learner_fn(
                             log_prob, traj_batch.log_prob, gae, config.system.clip_eps
                         ),
                     )
-                    # FIXME: Entropy calculation should not use post-episode transitions
-                    entropy = actor_policy.entropy().mean()
+
+                    entropies = actor_policy.entropy()
+                    entropies = jax.lax.cond(
+                        config.env.kwargs.disable_autoreset,
+                        lambda: entropies * ep_mask,
+                        lambda: entropies  
+                    )
+                    entropy = entropies.mean()
 
                     total_loss_actor = loss_actor - config.system.ent_coef * entropy
                     loss_info = {
