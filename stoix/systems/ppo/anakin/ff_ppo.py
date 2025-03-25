@@ -208,6 +208,7 @@ def get_learner_fn(
             standardize_advantages=config.system.standardize_advantages,
             truncation_flags=traj_batch.truncated,
             redistribute_reward_implicit=config.system.redistribute_reward_implicit,
+            bootstrap_on_truncation=config.system.bootstrap_on_truncation,
         )
 
         def _update_epoch(update_state: Tuple, _: Any) -> Tuple:
