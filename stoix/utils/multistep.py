@@ -20,6 +20,7 @@ def batch_truncated_generalized_advantage_estimation(
     truncation_flags: Optional[chex.Array] = None,
     redistribute_reward_implicit: bool = False,
     bootstrap_on_truncation: bool = True,
+    episode_mask: Optional[chex.Array] = None,
 ) -> Tuple[chex.Array, chex.Array]:
     """Computes truncated generalized advantage estimates for a sequence length k.
 
@@ -54,6 +55,9 @@ def batch_truncated_generalized_advantage_estimation(
     if truncation_flags is None:
         truncation_flags = jnp.zeros_like(r_t)
 
+    if episode_mask is None:
+        episode_mask = jnp.ones_like(r_t)
+
     truncation_mask = 1.0 - truncation_flags
 
     # Swap axes to make time axis the first dimension
@@ -68,6 +72,9 @@ def batch_truncated_generalized_advantage_estimation(
     chex.assert_type([r_t, values, discount_t, truncation_mask], float)
 
     lambda_ = jnp.ones_like(discount_t) * lambda_  # If scalar, make into vector.
+
+    r_t = r_t * episode_mask
+    values = values * jnp.pad(episode_mask, ((1, 0), (0, 0)), mode='constant', constant_values=1)
 
     optional_truncation_mask = jnp.ones_like(discount_t) if bootstrap_on_truncation else truncation_mask
 
@@ -144,6 +151,7 @@ def batch_truncated_monte_carlo_return_advantage(
     truncation_flags: Optional[chex.Array] = None,
     redistribute_reward_implicit: bool = False,
     bootstrap_on_truncation: bool = True,
+    episode_mask: Optional[chex.Array] = None,
 ) -> Tuple[chex.Array, chex.Array]:
     """Calculates the advantage assuming lambda=1 and gamma=1.
 
@@ -162,7 +170,7 @@ def batch_truncated_monte_carlo_return_advantage(
     """
     raise NotImplementedError("""
     MC advantage implementation is totally untested. Furthermore, `bootstrap_on_truncation`
-    is not yet implemented in this implementation.
+    and `episode_mask` are not yet implemented.
     """)
 
     if truncation_flags is None:
