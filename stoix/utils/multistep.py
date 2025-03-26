@@ -79,6 +79,7 @@ def batch_truncated_generalized_advantage_estimation(
     optional_truncation_mask = jnp.ones_like(discount_t) if bootstrap_on_truncation else truncation_mask
 
     delta_t = r_t + discount_t * optional_truncation_mask * values[1:] - values[:-1]
+    delta_t *= episode_mask
 
     # Iterate backwards to calculate advantages.
     def _body(
