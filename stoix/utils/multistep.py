@@ -63,8 +63,8 @@ def batch_truncated_generalized_advantage_estimation(
     # Swap axes to make time axis the first dimension
     if not time_major:
         batch_size = r_t.shape[0]
-        r_t, discount_t, values, truncation_mask = jax.tree_util.tree_map(
-            lambda x: jnp.swapaxes(x, 0, 1), (r_t, discount_t, values, truncation_mask)
+        r_t, discount_t, values, truncation_mask, episode_mask = jax.tree_util.tree_map(
+            lambda x: jnp.swapaxes(x, 0, 1), (r_t, discount_t, values, truncation_mask, episode_mask)
         )
     else:
         batch_size = r_t.shape[1]
