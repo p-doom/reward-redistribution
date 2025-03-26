@@ -21,4 +21,4 @@ redistribute_reward: False # Whether to redistribute episodic rewards across all
 redistribute_reward_implicit: False # Whether to implicitly redistribute episodic rewards across all transitions (scales advantage by (T-t)/T)
 disable_autoreset: True # Whether to disable Stoix-level autoresetting of environments (on env termination during rollout)
 use_mc_returns_ae: False # Whether to use Monte-Carlo returns for advantage estimation
-bootstrap_on_truncation: True # Whether to use value-bootstrapping on truncated trajectories (episode ending due to max_steps)
+bootstrap_on_truncation: False # Whether to use value-bootstrapping on truncated trajectories (episode ending due to max_steps)
