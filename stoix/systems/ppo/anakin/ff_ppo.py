@@ -135,27 +135,17 @@ def get_learner_fn(
         done_indices = jnp.where(jnp.any(traj_batch.done, axis=0), done_indices, trajectory_length)
         truncation_indices = jnp.argmax(traj_batch.truncated, axis=0) # shape: (num_trajectories,)
         truncation_indices = jnp.where(jnp.any(traj_batch.truncated, axis=0), truncation_indices, trajectory_length)
+
         episode_termination_indices = jnp.minimum(done_indices, truncation_indices)
 
         # Create mask for non-valid transitions (time > done_index for each trajectory)
         time_indices = jnp.arange(traj_batch.done.shape[0])[:, jnp.newaxis]  # (num_timesteps, 1)
-        post_episode_mask = time_indices > episode_termination_indices[jnp.newaxis, :]  # Mask for steps after episode ends
+        post_episode_mask = time_indices > episode_termination_indices[jnp.newaxis, :]
         episode_mask = jnp.logical_not(post_episode_mask)  # (num_timesteps, num_trajectories)
-
-        # If autoresetting is disabled, we nullify dones, values, rewards, and log_probs after end of episode
-        # FIXME: This is only navix-level. Assuming that most environments do not autoreset, we should make system.disable_autoreset
-        # the ground-truth
-        if config.env.kwargs.disable_autoreset:
-            episode_dones = jnp.where(episode_mask, traj_batch.done, False)
-            new_dones = jnp.where(jnp.any(episode_dones, axis=0), time_indices >= done_indices[jnp.newaxis, :], False)
-            # NOTE: We use `>` instead of `>=` since we would otherwise nullify the last delta of the episode in the GAE calculation
-            new_truncations = jnp.where(jnp.any(traj_batch.truncated, axis=0), time_indices > truncation_indices[jnp.newaxis, :], False)
-            traj_batch = traj_batch._replace(
-                done=new_dones,
-                truncated=new_truncations,
-                value=jnp.where(post_episode_mask, 0.0, traj_batch.value),
-                reward=jnp.where(post_episode_mask, 0.0, traj_batch.reward),
-            )
+        
+        if not config.system.disable_autoreset:
+            post_episode_mask = jnp.zeros_like(post_episode_mask)
+            episode_mask = jnp.ones_like(episode_mask)
 
         if config.system.redistribute_reward:
             # DISTRIBUTE EPISODIC REWARD ACROSS ALL TRANSITIONS
@@ -163,19 +153,16 @@ def get_learner_fn(
             # WARNING: This only works for the (sparse) episodic reward setting
             # and will silently corrupt the reward structure otherwise
 
-            # Episode lengths are index+1
             episode_lengths = episode_termination_indices + 1  # shape: (num_trajectories,)
             
             # Extract episodic reward (reward at last step for each trajectory)
             episodic_reward = traj_batch.reward[episode_termination_indices, jnp.arange(traj_batch.reward.shape[1])]  # shape: (num_trajectories,)
             
-            # Compute normalized reward per trajectory
             normalized_reward = episodic_reward / episode_lengths  # shape: (num_trajectories,)
             
-            # Broadcast normalized reward across time steps and apply mask
             new_reward = jnp.where(
                 episode_mask, 
-                normalized_reward[None, :],  # (1, num_trajectories)
+                normalized_reward[jnp.newaxis, :],  # (1, num_trajectories)
                 0
             )  # (num_timesteps, num_trajectories)
             
@@ -184,10 +171,7 @@ def get_learner_fn(
         # CALCULATE ADVANTAGE
         params, opt_states, key, env_state, last_timestep = learner_state
 
-        if config.env.kwargs.disable_autoreset:
-            last_val = jnp.zeros_like(episode_termination_indices)
-        else:
-            last_val = critic_apply_fn(params.critic_params, last_timestep.observation)
+        last_val = critic_apply_fn(params.critic_params, last_timestep.observation)
 
         r_t = traj_batch.reward
         v_t = jnp.concatenate([traj_batch.value, last_val[jnp.newaxis, ...]], axis=0)
@@ -208,6 +192,8 @@ def get_learner_fn(
             standardize_advantages=config.system.standardize_advantages,
             truncation_flags=traj_batch.truncated,
             redistribute_reward_implicit=config.system.redistribute_reward_implicit,
+            bootstrap_on_truncation=config.system.bootstrap_on_truncation,
+            episode_mask=episode_mask,
         )
 
         def _update_epoch(update_state: Tuple, _: Any) -> Tuple:
@@ -233,7 +219,7 @@ def get_learner_fn(
 
                     # CALCULATE ACTOR LOSS
                     loss_actor = jax.lax.cond(
-                        config.env.kwargs.disable_autoreset,
+                        config.system.disable_autoreset,
                         lambda: ppo_masked_clip_loss(
                             log_prob, traj_batch.log_prob, gae, config.system.clip_eps, ep_mask
                         ),
@@ -244,7 +230,7 @@ def get_learner_fn(
 
                     entropies = actor_policy.entropy()
                     entropies = jax.lax.cond(
-                        config.env.kwargs.disable_autoreset,
+                        config.system.disable_autoreset,
                         lambda: entropies * ep_mask,
                         lambda: entropies  
                     )
@@ -269,7 +255,7 @@ def get_learner_fn(
 
                     # CALCULATE VALUE LOSS
                     value_loss = jax.lax.cond(
-                        config.env.kwargs.disable_autoreset,
+                        config.system.disable_autoreset,
                         lambda: clipped_masked_value_loss(
                             value, traj_batch.value, targets, config.system.clip_eps, ep_mask
                         ),

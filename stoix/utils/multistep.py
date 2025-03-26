@@ -19,6 +19,8 @@ def batch_truncated_generalized_advantage_estimation(
     standardize_advantages: bool = False,
     truncation_flags: Optional[chex.Array] = None,
     redistribute_reward_implicit: bool = False,
+    bootstrap_on_truncation: bool = True,
+    episode_mask: Optional[chex.Array] = None,
 ) -> Tuple[chex.Array, chex.Array]:
     """Computes truncated generalized advantage estimates for a sequence length k.
 
@@ -53,13 +55,16 @@ def batch_truncated_generalized_advantage_estimation(
     if truncation_flags is None:
         truncation_flags = jnp.zeros_like(r_t)
 
+    if episode_mask is None:
+        episode_mask = jnp.ones_like(r_t)
+
     truncation_mask = 1.0 - truncation_flags
 
     # Swap axes to make time axis the first dimension
     if not time_major:
         batch_size = r_t.shape[0]
-        r_t, discount_t, values, truncation_mask = jax.tree_util.tree_map(
-            lambda x: jnp.swapaxes(x, 0, 1), (r_t, discount_t, values, truncation_mask)
+        r_t, discount_t, values, truncation_mask, episode_mask = jax.tree_util.tree_map(
+            lambda x: jnp.swapaxes(x, 0, 1), (r_t, discount_t, values, truncation_mask, episode_mask)
         )
     else:
         batch_size = r_t.shape[1]
@@ -68,8 +73,13 @@ def batch_truncated_generalized_advantage_estimation(
 
     lambda_ = jnp.ones_like(discount_t) * lambda_  # If scalar, make into vector.
 
-    delta_t = r_t + discount_t * values[1:] - values[:-1]
-    delta_t *= truncation_mask
+    r_t = r_t * episode_mask
+    values = values * jnp.pad(episode_mask, ((1, 0), (0, 0)), mode='constant', constant_values=1)
+
+    optional_truncation_mask = jnp.ones_like(discount_t) if bootstrap_on_truncation else truncation_mask
+
+    delta_t = r_t + discount_t * optional_truncation_mask * values[1:] - values[:-1]
+    delta_t *= episode_mask
 
     # Iterate backwards to calculate advantages.
     def _body(
@@ -88,7 +98,6 @@ def batch_truncated_generalized_advantage_estimation(
     )
 
     target_values = values[:-1] + advantage_t
-    advantage_t *= truncation_mask
 
     if redistribute_reward_implicit:
         # Scale the advantage of transitions of episodes by (T-t)/T, where T is the episode_length
@@ -142,6 +151,8 @@ def batch_truncated_monte_carlo_return_advantage(
     standardize_advantages: bool = False,
     truncation_flags: Optional[chex.Array] = None,
     redistribute_reward_implicit: bool = False,
+    bootstrap_on_truncation: bool = True,
+    episode_mask: Optional[chex.Array] = None,
 ) -> Tuple[chex.Array, chex.Array]:
     """Calculates the advantage assuming lambda=1 and gamma=1.
 
@@ -158,6 +169,10 @@ def batch_truncated_monte_carlo_return_advantage(
         Returns:
     The advantage at times [0, k-1].
     """
+    raise NotImplementedError("""
+    MC advantage implementation is totally untested. Furthermore, `bootstrap_on_truncation`
+    and `episode_mask` are not yet implemented.
+    """)
 
     if truncation_flags is None:
         truncation_flags = jnp.zeros_like(r_t)
