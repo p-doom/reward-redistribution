@@ -84,7 +84,7 @@ class TruncatedGeneralizedAdvantageEstimationTest(parameterized.TestCase):
         
         r_t = jnp.array([[0.0, 0.0, 0.0, 0.0, 0.0], [0.0, 0.0, 0.0, 0.0, 1.0]])
         # simulate a noisy/randomly initialized value function 
-        v_t = jax.random.uniform(jax.random.PRNGKey(0), (2, 6))
+        v_t = jax.random.uniform(jax.random.key(0), (2, 6))
 
         discount_t = 1.-r_t
         truncation_t = jnp.array([[0.0, 0.0, 0.0, 0.0, 1.0], [0.0, 0.0, 0.0, 0.0, 0.0]])
