@@ -48,7 +48,7 @@ class TruncatedGeneralizedAdvantageEstimationTest(parameterized.TestCase):
     def test_advantage_with_bootstrapping(self) -> None:
         """Test GAE advantage outputs with value bootstrapping in a sparse reward setting.
 
-        We are using lambda=1 and discount (gamma)=1.
+        We are using lambda=1 and gamma=1.
         """
         
         r_t = jnp.array([[0.0, 0.0, 0.0, 0.0, 0.0], [0.0, 0.0, 0.0, 0.0, 1.0]])
