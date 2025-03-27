@@ -76,18 +76,21 @@ class GymnaxWrapper(Wrapper):
 
     def step(self, state: GymnaxEnvState, action: chex.Array) -> Tuple[GymnaxEnvState, TimeStep]:
         key, key_step = jax.random.split(state.key)
-        obs, gymnax_state, reward, done, _ = self._env.step(
+        obs, gymnax_state, reward, termination, truncation, _ = self._env.step(
             key_step, state.gymnax_env_state, action, self._env_params
         )
         state = GymnaxEnvState(
             key=key, gymnax_env_state=gymnax_state, step_count=state.step_count + 1
         )
 
+        discount = jnp.array(1.0 - termination, dtype=float)
+        final_step = jnp.logical_or(termination, truncation)
+
         timestep = TimeStep(
             observation=Observation(obs, self._legal_action_mask, state.step_count),
             reward=reward.astype(float),
-            discount=jnp.array(1.0 - done, dtype=float),
-            step_type=jax.lax.select(done, StepType.LAST, StepType.MID),
+            discount=discount,
+            step_type=jax.lax.select(final_step, StepType.LAST, StepType.MID),
             extras={},
         )
         return state, timestep
