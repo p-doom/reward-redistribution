@@ -258,7 +258,9 @@ class JsonLogger(BaseLogger):
 
     def __init__(self, cfg: DictConfig, unique_token: str) -> None:
         json_exp_path = get_logger_path(cfg, "json")
-        json_logs_path = os.path.join(cfg.logger.base_exp_path, f"{json_exp_path}/{unique_token}")
+        experiment_name = cfg.get("experiment_name", "")
+
+        json_logs_path = os.path.join(cfg.logger.base_exp_path, f"{json_exp_path}_{experiment_name}/{unique_token}")
 
         # if a custom path is specified, use that instead
         if cfg.logger.kwargs.json_path is not None:
