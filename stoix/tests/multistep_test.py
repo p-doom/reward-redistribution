@@ -68,7 +68,6 @@ class TruncatedGeneralizedAdvantageEstimationTest(parameterized.TestCase):
             bootstrap_on_truncation=True
         )
 
-
         expected_advantages = jnp.zeros_like(r_t)
         expected_targets = jnp.ones_like(r_t)
 
