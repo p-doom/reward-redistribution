@@ -102,8 +102,8 @@ class TruncatedGeneralizedAdvantageEstimationTest(parameterized.TestCase):
         )
 
         # simulate not bootstrapping for the last_val
-        expected_targets = jnp.ones_like(r_t)
-        expected_targets = expected_targets.at[0].set(expected_targets[0] * 0.0)
+        expected_targets = [jnp.zeros_like(r_t[0]),
+                             jnp.ones_like(r_t[1])]
         np.testing.assert_allclose(targets, expected_targets, atol=1e-3)
 
     @chex.variants(without_jit=True, with_device=True, without_device=True)
@@ -132,8 +132,8 @@ class TruncatedGeneralizedAdvantageEstimationTest(parameterized.TestCase):
         )
 
         # simulate bootstrapping for the last_val
-        expected_targets = jnp.ones_like(r_t)
-        expected_targets = expected_targets.at[0].set(expected_targets[0] * v_t[0,-1])
+        expected_targets = [jnp.ones_like(r_t[0]) * v_t[0,-1], 
+                            jnp.ones_like(r_t[1])]
         np.testing.assert_allclose(targets, expected_targets, atol=1e-3)
 
 
