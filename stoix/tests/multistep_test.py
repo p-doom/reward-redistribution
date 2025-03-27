@@ -107,7 +107,7 @@ class TruncatedGeneralizedAdvantageEstimationTest(parameterized.TestCase):
         np.testing.assert_allclose(targets, expected_targets, atol=1e-3)
 
     @chex.variants(without_jit=True, with_device=True, without_device=True)
-    def test_with_bootstrapping(self) -> None:
+    def test_target_value_with_bootstrapping(self) -> None:
         """Test GAE with value bootstrapping in a sparse reward setting.
 
         We are using lambda=1 and discount (gamma)=1.
