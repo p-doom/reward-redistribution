@@ -77,7 +77,7 @@ class TruncatedGeneralizedAdvantageEstimationTest(parameterized.TestCase):
 
     @chex.variants(without_jit=True, with_device=True, without_device=True)
     def test_target_value_no_bootstrapping(self) -> None:
-        """Test GAE without value bootstrapping in a sparse reward setting.
+        """Test GAE target values without value bootstrapping in a sparse reward setting.
 
         We are using lambda=1 and discount (gamma)=1.
         """
