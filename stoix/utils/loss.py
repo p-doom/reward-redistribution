@@ -49,7 +49,7 @@ def ppo_masked_clip_loss(
 
     masked_loss_actor = loss_actor * episode_mask
 
-    loss_actor = masked_loss_actor.mean()
+    loss_actor = masked_loss_actor.mean(where=episode_mask)
     return loss_actor
 
 
@@ -111,7 +111,7 @@ def clipped_masked_value_loss(
     masked_value_losses = value_losses * episode_mask
     masked_value_losses_clipped = value_losses_clipped * episode_mask
 
-    value_loss = 0.5 * jnp.maximum(masked_value_losses, masked_value_losses_clipped).mean()
+    value_loss = 0.5 * jnp.maximum(masked_value_losses, masked_value_losses_clipped).mean(where=episode_mask)
 
     return value_loss
 
