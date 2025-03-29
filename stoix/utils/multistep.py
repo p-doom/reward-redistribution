@@ -136,7 +136,7 @@ def batch_truncated_generalized_advantage_estimation(
         )
 
     if standardize_advantages:
-        advantage_t = jax.nn.standardize(advantage_t, axis=(0, 1), where=truncation_mask)
+        advantage_t = jax.nn.standardize(advantage_t, axis=(0, 1), where=episode_mask)
 
     return advantage_t, target_values
 
