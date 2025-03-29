@@ -264,12 +264,19 @@ class JsonLogger(BaseLogger):
         tag_string = "_".join(tags)
         unique_id = uuid.uuid4()
 
-        algorithm_name = f"{cfg.system.system_name}_{tag_string}"
+        if tag_string:
+            algorithm_name = f"{cfg.system.system_name}_{tag_string}"
+            json_logs_path = os.path.join(
+                cfg.logger.base_exp_path,
+                f"{json_exp_path}_{tag_string}/{unique_token}_{unique_id}"
+            )
+        else:
+            algorithm_name = cfg.system.system_name
+            json_logs_path = os.path.join(
+                cfg.logger.base_exp_path,
+                f"{json_exp_path}/{unique_token}_{unique_id}"
+            )
 
-        json_logs_path = os.path.join(
-            cfg.logger.base_exp_path,
-            f"{json_exp_path}_{tag_string}/{unique_token}_{unique_id}"
-        )
         # if a custom path is specified, use that instead
         if cfg.logger.kwargs.json_path is not None:
             json_logs_path = os.path.join(
