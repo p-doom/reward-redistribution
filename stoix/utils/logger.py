@@ -7,6 +7,7 @@ from datetime import datetime
 from enum import Enum
 from typing import Dict, List, Union
 from multiprocessing import Queue
+import uuid
 
 import jax
 import neptune
@@ -258,19 +259,27 @@ class JsonLogger(BaseLogger):
 
     def __init__(self, cfg: DictConfig, unique_token: str) -> None:
         json_exp_path = get_logger_path(cfg, "json")
-        experiment_name = cfg.get("experiment_name", "")
 
-        json_logs_path = os.path.join(cfg.logger.base_exp_path, f"{json_exp_path}_{experiment_name}/{unique_token}")
+        tags = cfg.logger.kwargs.get("tags", [])
+        tag_string = "_".join(tags)
+        unique_id = uuid.uuid4()
 
+        algorithm_name = f"{cfg.system.system_name}_{tag_string}"
+
+        json_logs_path = os.path.join(
+            cfg.logger.base_exp_path,
+            f"{json_exp_path}_{tag_string}/{unique_token}_{unique_id}"
+        )
         # if a custom path is specified, use that instead
         if cfg.logger.kwargs.json_path is not None:
             json_logs_path = os.path.join(
                 cfg.logger.base_exp_path, "json", cfg.logger.kwargs.json_path
             )
 
+
         self.logger = MarlEvalJsonLogger(
             path=json_logs_path,
-            algorithm_name=cfg.system.system_name,
+            algorithm_name=algorithm_name,
             task_name=cfg.env.scenario.task_name,
             environment_name=cfg.env.env_name,
             seed=cfg.arch.seed,
@@ -281,7 +290,7 @@ class JsonLogger(BaseLogger):
 
         if key not in self._METRICS_TO_LOG:
             return
-
+        
         # The key is in the format <metric_name>/<aggregation_fn> so we need to change it to:
         # <agg fn>_<metric_name>
         if "/" in key:
