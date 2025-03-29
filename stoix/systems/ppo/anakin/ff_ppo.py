@@ -234,7 +234,7 @@ def get_learner_fn(
                         lambda: entropies * ep_mask,
                         lambda: entropies  
                     )
-                    entropy = entropies.mean()
+                    entropy = entropies.mean(where=ep_mask)
 
                     total_loss_actor = loss_actor - config.system.ent_coef * entropy
                     loss_info = {
