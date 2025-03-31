@@ -568,7 +568,7 @@ def run_experiment(_config: DictConfig) -> float:
             config.env.kwargs.get("max_steps_in_episode") is not None
             and config.env.kwargs.max_steps_in_episode <= config.system.rollout_length
         )
-    ), "Disabling autoresetting requires `max_steps` to be smaller than `rollout_length`."
+    ), "Disabling autoresetting requires `max_steps` to be smaller or equal to `rollout_length`."
 
     # Create the environments for train and eval.
     env, eval_env = environments.make(config=config)
