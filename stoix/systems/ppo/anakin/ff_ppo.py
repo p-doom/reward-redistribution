@@ -558,6 +558,17 @@ def run_experiment(_config: DictConfig) -> float:
         config.system.disable_autoreset and config.env.kwargs.disable_autoreset
     ), """Autoresetting is not supported any more due to bugs in the upstream implementation. Further
     information is available at https://github.com/p-doom/reward-redistribution/pull/10."""
+    assert (
+        not config.system.disable_autoreset
+        or (
+            config.env.kwargs.get("max_steps") is not None
+            and config.env.kwargs.max_steps <= config.system.rollout_length
+        )
+        or (
+            config.env.kwargs.get("max_steps_in_episode") is not None
+            and config.env.kwargs.max_steps_in_episode <= config.system.rollout_length
+        )
+    ), "Disabling autoresetting requires `max_steps` to be smaller than `rollout_length`."
 
     # Create the environments for train and eval.
     env, eval_env = environments.make(config=config)
