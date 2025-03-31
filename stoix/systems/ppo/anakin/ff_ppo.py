@@ -358,7 +358,8 @@ def get_learner_fn(
 
         params, opt_states, traj_batch, advantages, targets, episode_mask, key = update_state
         learner_state = OnPolicyLearnerState(params, opt_states, key, env_state, last_timestep)
-        metric = traj_batch.info
+        metric = traj_batch.info 
+        metric["episode_mask"] = episode_mask
         return learner_state, (metric, loss_info)
 
     def learner_fn(
