@@ -96,8 +96,8 @@ def get_final_step_metrics(metrics: Dict[str, chex.Array]) -> Tuple[Dict[str, ch
     """
     is_final_ep = metrics.pop("is_terminal_step")
     episode_mask = metrics.pop("episode_mask")
-    has_final_ep_step = bool(jnp.any(is_final_ep))
     masked_is_final_ep = jnp.logical_and(is_final_ep, episode_mask)
+    has_final_ep_step = bool(jnp.any(masked_is_final_ep))
 
     final_metrics: Dict[str, chex.Array]
     # If it didn't make it to the final step, return zeros.
