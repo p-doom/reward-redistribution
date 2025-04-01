@@ -95,13 +95,15 @@ def get_final_step_metrics(metrics: Dict[str, chex.Array]) -> Tuple[Dict[str, ch
     expects arrays for computing summary statistics on the episode metrics.
     """
     is_final_ep = metrics.pop("is_terminal_step")
-    has_final_ep_step = bool(jnp.any(is_final_ep))
+    episode_mask = metrics.pop("episode_mask")
+    masked_is_final_ep = jnp.logical_and(is_final_ep, episode_mask)
+    has_final_ep_step = bool(jnp.any(masked_is_final_ep))
 
     final_metrics: Dict[str, chex.Array]
     # If it didn't make it to the final step, return zeros.
     if not has_final_ep_step:
         final_metrics = jax.tree_util.tree_map(jnp.zeros_like, metrics)
     else:
-        final_metrics = jax.tree_util.tree_map(lambda x: x[is_final_ep], metrics)
+        final_metrics = jax.tree_util.tree_map(lambda x: x[masked_is_final_ep], metrics)
 
     return final_metrics, has_final_ep_step

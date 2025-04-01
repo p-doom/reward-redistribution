@@ -6,6 +6,7 @@ scenario:
   task_name: cartpole # For logging purposes.
 
 kwargs: {
+  max_steps_in_episode: 500,
   disable_autoreset: True,
 }
 
