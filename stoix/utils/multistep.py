@@ -101,23 +101,20 @@ def batch_truncated_generalized_advantage_estimation(
 
     if redistribute_reward_implicit:
         # Scale the advantage of transitions of episodes by (T-t)/T, where T is the episode_length
-        # Define seq_len based on the shape of r_t
-        seq_len = r_t.shape[0]  # (rollout_length,)
+        trajectory_length = r_t.shape[0]  # (rollout_length,)
 
-        # Find the last non-zero reward index for each environment
-        last_reward_indices = jnp.max(
-            jnp.where(r_t != 0, jnp.arange(seq_len)[:, jnp.newaxis], -1), axis=0
-        )  # (num_envs,)
+        episode_termination_indices = jnp.max(
+            jnp.where(episode_mask, jnp.arange(trajectory_length)[:, jnp.newaxis], -1), # type: ignore
+            axis=0
+        ) # (num_envs,)
 
-        # Calculate episode lengths for each environment
-        episode_lengths = last_reward_indices + 1  # (num_envs,)
+        episode_lengths = episode_termination_indices + 1  # (num_envs,)
 
-        # Create scaling factors for each environment using episode_lengths
         scaling_factors = (
-            episode_lengths - jnp.arange(seq_len)[:, jnp.newaxis]
+            episode_lengths - jnp.arange(trajectory_length)[:, jnp.newaxis]
         ) / episode_lengths  # (rollout_length, num_envs)
         scaling_factors = jnp.where(
-            jnp.arange(seq_len)[:, jnp.newaxis] <= last_reward_indices,
+            episode_mask, # type: ignore
             scaling_factors,
             1.0,
         )
