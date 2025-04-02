@@ -283,7 +283,6 @@ class JsonLogger(BaseLogger):
                 cfg.logger.base_exp_path, "json", cfg.logger.kwargs.json_path
             )
 
-
         self.logger = MarlEvalJsonLogger(
             path=json_logs_path,
             algorithm_name=algorithm_name,
