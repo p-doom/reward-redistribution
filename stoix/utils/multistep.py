@@ -103,7 +103,9 @@ def batch_truncated_generalized_advantage_estimation(
         # Scale the advantage of transitions of episodes by (T-t)/T, where T is the episode_length
         trajectory_length = r_t.shape[0]  # (rollout_length,)
 
-        episode_termination_indices = jnp.argmax(episode_mask, axis=0) # type: ignore
+        episode_termination_indices = jnp.max(
+            jnp.where(episode_mask, jnp.arange(trajectory_length)[:, jnp.newaxis], -1) # type: ignore
+        ) # (num_envs,)
 
         episode_lengths = episode_termination_indices + 1  # (num_envs,)
 
