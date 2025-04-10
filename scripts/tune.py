@@ -1,0 +1,218 @@
+import optuna
+import submitit
+import time
+import os  # For getting process ID for logging
+import stoix.systems.ppo.anakin.ff_ppo as ppo
+# ==============================================================================
+# Configuration
+# ==============================================================================
+
+# --- Optuna Storage ---
+# REQUIRED for n_jobs > 1 (multiprocessing).
+# Use a file path accessible by all potential processes.
+# If running n_jobs on a single machine, a local path is fine.
+# If workers might run on different cluster nodes, use a path on a
+# shared network filesystem (e.g., NFS home directory).
+STORAGE_URL = "sqlite:///my_hpo_study_njobs.db"
+STUDY_NAME = "hpo_study_njobs_v1" # Choose a descriptive name
+
+# --- Evaluation Function ---
+# This is the function that will actually be run on the SLURM nodes.
+# It should take parameters directly and return the objective value.
+# It should NOT contain Optuna or Submitit logic.
+def my_function_on_node(x, y):
+    """
+    Example function to be evaluated by SLURM. Replace with your actual logic.
+    Takes parameters directly, returns a single objective value (float).
+    """
+    pid = os.getpid()
+    print(f"SLURM Worker (PID {pid}): Evaluating x={x:.4f}, y={y:.4f}", flush=True)
+    # Simulate work - replace with your actual computation
+    time.sleep(max(1, int(abs(x)))) # Example sleep time
+    result = -(x**2) + y  # Example objective: Maximize this
+    print(f"SLURM Worker (PID {pid}): Finished x={x:.4f}, y={y:.4f}, result={result:.4f}", flush=True)
+    return result
+
+SEEDS=[1,2,3,4,5]
+ENVS=[
+    # TODO add which we want to tune on 
+    "navix/door_key_16x16",
+    "navix/door_key_8x8",
+    "navix/four_rooms",
+    "navix/four_rooms_9x9",
+    "navix/empty_5x5",
+]
+def run_job_on_node(num_envs):
+    ppo.hydra_entry_point() # TODO figure out a way to pass num_envs in the config.  
+    
+
+# --- Submitit / SLURM Configuration ---
+SLURM_PARTITION = "NORMAL" # <-- partition on cremers cluster 
+SLURM_LOG_FOLDER_BASE = "log_slurm_njobs" # Base directory for SLURM logs
+SLURM_TIMEOUT_MIN = 15     # TODO Max time for one evaluation job (set to 2h)
+SLURM_CPUS_PER_TASK = 1     # TODO set to 4
+SLURM_MEM_GB = 2            # TODO set to 5
+SLURM_GPUS_PER_NODE = 0     # TODO Set to >0 if your function needs GPUs
+
+# --- Optimization Parameters ---
+N_PARALLEL_JOBS = 5  # How many Optuna trials/processes/SLURM jobs to run concurrently TODO ideally 10 because thats queue size. 
+TOTAL_TRIALS = 20    # Total number of trials to run for the study TODO 500?
+
+# ==============================================================================
+# Optuna Objective Function (Synchronous)
+# ==============================================================================
+
+# This function is called by each Optuna worker process.
+# It is SYNCHRONOUS (no async/await).
+def objective(trial):
+    """
+    Optuna objective function. Runs synchronously in an Optuna worker process.
+    Suggests parameters, submits the evaluation job via submitit, waits
+    blockingly for the result, and returns it.
+    """
+    # 1. Suggest hyperparameters
+    x = trial.suggest_float('x', -10, 10)
+    y = trial.suggest_float('y', -10, 10)
+
+    # Get identifiers for logging
+    trial_number = trial.number
+    process_id = os.getpid()
+
+    print(f"Optuna Process PID {process_id} (Trial {trial_number}): Starting objective. Params: x={x:.4f}, y={y:.4f}", flush=True)
+
+    # 2. Configure submitit for this specific trial
+    # Create a unique log folder for this trial's SLURM job
+    log_folder = os.path.join(SLURM_LOG_FOLDER_BASE, f"trial_{trial_number}_%j") # %j = SLURM Job ID
+    executor = submitit.AutoExecutor(folder=log_folder)
+    executor.update_parameters(
+        timeout_min=SLURM_TIMEOUT_MIN,
+        slurm_partition=SLURM_PARTITION, # Make sure this is set correctly
+        cpus_per_task=SLURM_CPUS_PER_TASK,
+        gpus_per_node=SLURM_GPUS_PER_NODE,
+        mem_gb=SLURM_MEM_GB,
+        name=f"optuna_{STUDY_NAME}_t{trial_number}" # Unique SLURM job name
+    )
+
+    # 3. Submit the evaluation function to SLURM
+    print(f"Optuna Process PID {process_id} (Trial {trial_number}): Submitting SLURM job.", flush=True)
+    # Pass the parameters directly to the function defined above
+    job = executor.submit(my_function_on_node, x, y) # TODO this works
+    # job = executor.submit(run_job_on_node, x, y) # TODO this doesn't work
+    print(f"Optuna Process PID {process_id} (Trial {trial_number}): Submitted SLURM job {job.job_id}. Waiting blockingly...", flush=True)
+
+    # 4. Wait BLOCKINGLY for the SLURM job to finish
+    try:
+        # job.result() blocks THIS Optuna process until the SLURM job is done.
+        result = job.result() # This will contain the return value of my_function_on_node
+        print(f"Optuna Process PID {process_id} (Trial {trial_number}): Job {job.job_id} completed successfully. Result: {result:.4f}", flush=True)
+        # 5. Return the numerical result to Optuna
+        return result
+
+    except Exception as e:
+        # Handle job failures (timeout, error in the node function, etc.)
+        job_state = "UNKNOWN"
+        stderr = "N/A"
+        try:
+            job_state = job.state
+            stderr = job.stderr() # Try to get standard error output
+        except Exception:
+            pass # Ignore errors getting state/stderr if job object is problematic
+
+        print(f"Optuna Process PID {process_id} (Trial {trial_number}): Job {job.job_id} FAILED. State: {job_state}.", flush=True)
+        print(f"    Error: {e}", flush=True)
+        if stderr:
+             print(f"    Stderr (last 500 chars): ... {stderr[-500:]}", flush=True)
+
+        # Tell Optuna that this trial failed and should be pruned
+        # This prevents Optuna from considering it a valid result
+        raise optuna.TrialPruned(f"Submitit job {job.job_id} failed or timed out.")
+
+
+# ==============================================================================
+# Main Script Execution
+# ==============================================================================
+
+if __name__ == "__main__":
+    # run_job_on_node(6) TODO this doesn't work yet (hydra)
+    # breakpoint()
+    print(f"Starting Optuna HPO script.")
+    print(f"  Study Name: {STUDY_NAME}")
+    print(f"  Storage: {STORAGE_URL}")
+    print(f"  Parallel Jobs (Optuna Processes): {N_PARALLEL_JOBS}")
+    print(f"  Total Trials: {TOTAL_TRIALS}")
+    print(f"  SLURM Partition: {SLURM_PARTITION}")
+
+    # Ensure the base log directory exists
+    os.makedirs(SLURM_LOG_FOLDER_BASE, exist_ok=True)
+    print(f"  SLURM logs will be stored under ./{SLURM_LOG_FOLDER_BASE}/")
+
+    # --- Create or load the study using the persistent storage ---
+    study = optuna.create_study(
+        storage=STORAGE_URL,
+        study_name=STUDY_NAME,
+        direction="maximize",   # or "minimize" depending on your objective
+        load_if_exists=True     # Allows resuming if the script is interrupted
+    )
+
+    # --- Run the optimization loop ---
+    # Optuna handles creating/managing 'N_PARALLEL_JOBS' processes.
+    # Each process connects to the storage and runs the 'objective' function.
+    print("\nStarting study.optimize()...")
+    try:
+        study.optimize(
+            objective,              # Pass the SYNCHRONOUS objective function
+            n_trials=TOTAL_TRIALS,  # Total number of trials to run across all processes
+            n_jobs=N_PARALLEL_JOBS  # Use multiprocessing managed by Optuna
+            # timeout=3600          # Optional: Total time limit in seconds for the study
+        )
+    except KeyboardInterrupt:
+        print("\nOptimization interrupted by user (KeyboardInterrupt).")
+    except Exception as e:
+        print(f"\nAn unexpected error occurred during study.optimize: {e}")
+        # Consider adding more specific error handling if needed
+    finally:
+         print("\nOptimization loop finished or was interrupted.")
+
+    # --- Print Final Study Summary ---
+    print("\n" + "="*40)
+    print("Final Study Summary")
+    print("="*40)
+
+    # Reload the study from storage to ensure we have the latest state
+    try:
+        study = optuna.load_study(study_name=STUDY_NAME, storage=STORAGE_URL)
+
+        print(f"Study Name: {study.study_name}")
+        print(f"Direction: {study.direction}")
+        print(f"Number of trials recorded: {len(study.trials)}")
+
+        # Get trial state counts
+        complete_trials = [t for t in study.trials if t.state == optuna.trial.TrialState.COMPLETE]
+        pruned_trials = [t for t in study.trials if t.state == optuna.trial.TrialState.PRUNED] # Includes failures handled above
+        fail_trials = [t for t in study.trials if t.state == optuna.trial.TrialState.FAIL]     # Should be 0 if handled by prune
+        running_trials = [t for t in study.trials if t.state == optuna.trial.TrialState.RUNNING]
+
+        print(f"  Trials Completed Successfully: {len(complete_trials)}")
+        print(f"  Trials Pruned (Failures/Timeouts): {len(pruned_trials)}")
+        print(f"  Trials Explicitly Failed (Unexpected): {len(fail_trials)}")
+        print(f"  Trials Still Marked Running (If any): {len(running_trials)}")
+
+        # Print best trial information if any completed successfully
+        if complete_trials:
+            print("-" * 20)
+            print(f"Best trial found:")
+            print(f"  Number: {study.best_trial.number}")
+            print(f"  Value (Objective Score): {study.best_value:.6f}")
+            print(f"  Parameters: ")
+            for key, value in study.best_params.items():
+                print(f"    {key}: {value}")
+        elif pruned_trials:
+            print("\nNo trials completed successfully (all failed or were pruned).")
+        else:
+            print("\nNo trials seem to have run or completed.")
+
+    except Exception as e:
+        print(f"\nAn error occurred while loading or summarizing the study results: {e}")
+
+    print("="*40)
+    print("Script finished.")
