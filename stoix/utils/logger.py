@@ -416,7 +416,7 @@ def _make_multi_logger(cfg: DictConfig) -> BaseLogger:
     """Creates a MultiLogger given a config"""
 
     loggers: List[BaseLogger] = []
-    unique_token = datetime.now().strftime("%Y%m%d%H%M%S")
+    unique_token = datetime.now().strftime("%Y%m%d%H%M%S%f")
 
     if (
         (cfg.logger.use_neptune or cfg.logger.use_wandb)
