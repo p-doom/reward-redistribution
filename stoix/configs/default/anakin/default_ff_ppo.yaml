@@ -4,6 +4,7 @@ defaults:
   - system: ppo/ff_ppo
   - network: mlp
   - env: gymnax/cartpole
+  - override hydra/launcher: submitit_slurm
   - _self_
 
 hydra:
