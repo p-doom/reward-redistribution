@@ -3,6 +3,8 @@ import submitit
 import time
 import os  # For getting process ID for logging
 import stoix.systems.ppo.anakin.ff_ppo as ppo
+import hydra
+from omegaconf import DictConfig, OmegaConf
 # ==============================================================================
 # Configuration
 # ==============================================================================
@@ -43,20 +45,59 @@ ENVS=[
     "navix/empty_5x5",
 ]
 def run_job_on_node(num_envs):
-    ppo.hydra_entry_point() # TODO figure out a way to pass num_envs in the config.  
+    # TODO check if we can pmap instead of looping!
+    total_return = 0
+    num_runs = 0
+
+    for seed in SEEDS:
+        for env in ENVS:
+            with hydra.initialize(
+                config_path="../stoix/configs/default/anakin",
+                version_base="1.2"):
+                # 3. Compose the configuration
+                #    'config_name' is the name of your main config file (without .yaml)
+                #    'overrides' is a list of strings, just like on the command line
+                cfg = hydra.compose(
+                    config_name="default_ff_ppo",
+                    overrides=[
+                        f"env={env}",
+                        f"arch.seed={seed}",
+                        f"arch.total_num_envs={num_envs}"
+                    ]
+                )
+
+                # Optional: Print the composed config to verify
+                # print("Composed Configuration in Caller:")
+                # print(OmegaConf.to_yaml(cfg))
+
+                # 4. Call your function directly with the composed config
+                print("\n--- Calling train_model function ---")
+                final_absolute_return = ppo.hydra_entry_point(cfg) # TODO figure out a way to pass num_envs in the config.  
+                print("--- train_model function finished ---")
+
+                # 5. Use the returned value
+                print(f"\nReceived final_absolute_return in caller script: {final_absolute_return}")
+                total_return += final_absolute_return
+                num_runs += 1
+
+    average_return = total_return / num_runs
+    print(f"\nAverage final_absolute_return over all runs: {average_return}")
+    return average_return
+
+
     
 
 # --- Submitit / SLURM Configuration ---
 SLURM_PARTITION = "NORMAL" # <-- partition on cremers cluster 
 SLURM_LOG_FOLDER_BASE = "log_slurm_njobs" # Base directory for SLURM logs
-SLURM_TIMEOUT_MIN = 15     # TODO Max time for one evaluation job (set to 2h)
-SLURM_CPUS_PER_TASK = 1     # TODO set to 4
-SLURM_MEM_GB = 2            # TODO set to 5
-SLURM_GPUS_PER_NODE = 0     # TODO Set to >0 if your function needs GPUs
+SLURM_TIMEOUT_MIN = 120     # TODO Max time for one evaluation job (set to 2h)
+SLURM_CPUS_PER_TASK = 4     # TODO set to 4
+SLURM_MEM_GB = 5            # TODO set to 5
+SLURM_GPUS_PER_NODE = 1     # TODO Set to >0 if your function needs GPUs
 
 # --- Optimization Parameters ---
-N_PARALLEL_JOBS = 5  # How many Optuna trials/processes/SLURM jobs to run concurrently TODO ideally 10 because thats queue size. 
-TOTAL_TRIALS = 20    # Total number of trials to run for the study TODO 500?
+N_PARALLEL_JOBS = 10  # How many Optuna trials/processes/SLURM jobs to run concurrently TODO ideally 10 because thats queue size. 
+TOTAL_TRIALS = 50    # Total number of trials to run for the study TODO 500?
 
 # ==============================================================================
 # Optuna Objective Function (Synchronous)
@@ -71,14 +112,17 @@ def objective(trial):
     blockingly for the result, and returns it.
     """
     # 1. Suggest hyperparameters
-    x = trial.suggest_float('x', -10, 10)
-    y = trial.suggest_float('y', -10, 10)
+    # x = trial.suggest_float('x', -10, 10)
+    # y = trial.suggest_float('y', -10, 10)
+    num_envs = trial.suggest_int('num_envs', 2**6, 2**12, log=True)
 
     # Get identifiers for logging
     trial_number = trial.number
     process_id = os.getpid()
 
-    print(f"Optuna Process PID {process_id} (Trial {trial_number}): Starting objective. Params: x={x:.4f}, y={y:.4f}", flush=True)
+    # print(f"Optuna Process PID {process_id} (Trial {trial_number}): Starting objective. Params: x={x:.4f}, y={y:.4f}", flush=True)
+    print(f"Optuna Process PID {process_id} (Trial {trial_number}): Starting objective. Params: num_envs={num_envs}", flush=True)
+
 
     # 2. Configure submitit for this specific trial
     # Create a unique log folder for this trial's SLURM job
@@ -96,8 +140,8 @@ def objective(trial):
     # 3. Submit the evaluation function to SLURM
     print(f"Optuna Process PID {process_id} (Trial {trial_number}): Submitting SLURM job.", flush=True)
     # Pass the parameters directly to the function defined above
-    job = executor.submit(my_function_on_node, x, y) # TODO this works
-    # job = executor.submit(run_job_on_node, x, y) # TODO this doesn't work
+    # job = executor.submit(my_function_on_node, x, y) # TODO this works
+    job = executor.submit(run_job_on_node, num_envs) # TODO this doesn't work
     print(f"Optuna Process PID {process_id} (Trial {trial_number}): Submitted SLURM job {job.job_id}. Waiting blockingly...", flush=True)
 
     # 4. Wait BLOCKINGLY for the SLURM job to finish
@@ -133,7 +177,7 @@ def objective(trial):
 # ==============================================================================
 
 if __name__ == "__main__":
-    # run_job_on_node(6) TODO this doesn't work yet (hydra)
+    # run_job_on_node(6) # TODO this doesn't work yet (hydra)
     # breakpoint()
     print(f"Starting Optuna HPO script.")
     print(f"  Study Name: {STUDY_NAME}")
