@@ -302,6 +302,13 @@ def get_learner_fn(
                     (critic_grads, critic_loss_info), axis_name="device"
                 )
 
+                squared_actor_grads = jax.tree_util.tree_map(lambda x: jnp.sum(x**2), actor_grads)
+                sum_squared_actor_grads = jax.tree_util.tree_reduce(lambda x, y: x + y, squared_actor_grads, 0.0)
+                global_actor_grad_norm = jnp.sqrt(sum_squared_actor_grads)
+                squared_critic_grads = jax.tree_util.tree_map(lambda x: jnp.sum(x**2), critic_grads)
+                sum_squared_critic_grads = jax.tree_util.tree_reduce(lambda x, y: x + y, squared_critic_grads, 0.0)
+                global_critic_grad_norm = jnp.sqrt(sum_squared_critic_grads)
+
                 # UPDATE ACTOR PARAMS AND OPTIMISER STATE
                 actor_updates, actor_new_opt_state = actor_update_fn(
                     actor_grads, opt_states.actor_opt_state
@@ -322,6 +329,8 @@ def get_learner_fn(
                 loss_info = {
                     **actor_loss_info,
                     **critic_loss_info,
+                    "global_actor_grad_norm": global_actor_grad_norm ,
+                    "global_critic_grad_norm": global_critic_grad_norm
                 }
                 return (new_params, new_opt_state), loss_info
 
@@ -633,7 +642,6 @@ def run_experiment(_config: DictConfig) -> float:
         t = int(steps_per_rollout * (eval_step + 1))
         episode_metrics, ep_completed = get_final_step_metrics(learner_output.episode_metrics)
         episode_metrics["steps_per_second"] = steps_per_rollout / elapsed_time
-
         # Separately log timesteps, actoring metrics and training metrics.
         logger.log({"timestep": t}, t, eval_step, LogEvent.MISC)
         if ep_completed:  # only log episode metrics if an episode was completed in the rollout.
@@ -646,6 +654,7 @@ def run_experiment(_config: DictConfig) -> float:
             config.system.epochs * config.system.num_minibatches
         )
         train_metrics["steps_per_second"] = opt_steps_per_eval / elapsed_time
+
         logger.log(train_metrics, t, eval_step, LogEvent.TRAIN)
 
         # Prepare for evaluation.
