@@ -245,6 +245,7 @@ class TensorboardLogger(BaseLogger):
 
         self.logger = tensorboard_logger.Logger(tb_logs_path)
         self.log = self.logger.log_value
+        print(f"Logging to tensorboard in path: {tb_logs_path}")
 
     def log_stat(self, key: str, value: float, step: int, eval_step: int, event: LogEvent) -> None:
         t = step if event != LogEvent.EVAL else eval_step
