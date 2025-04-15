@@ -55,6 +55,9 @@ if [[ -n "$MATCHING_LOG_FILE" ]]; then
     echo "Config path:    $HYDRA_CONFIG_DIR/config.yaml"
     echo "Overrides path: $HYDRA_CONFIG_DIR/overrides.yaml"
     echo "--------------------------------------------------"
+    cat "$HYDRA_CONFIG_DIR/overrides.yaml"
+    echo "--------------------------------------------------"
+
   else
     echo "Error: Found Submitit log file '$MATCHING_LOG_FILE' and derived Hydra run directory '$HYDRA_RUN_DIR',"
     echo "       but could not find expected '.hydra' directory within it."
