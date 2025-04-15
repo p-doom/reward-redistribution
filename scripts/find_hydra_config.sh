@@ -1,6 +1,12 @@
 #!/bin/bash
 
-TB_RUN="20250415013142024942"
+if [ -z "$1" ]; then
+    echo "Usage: $0 <TensorBoard_Run_ID>"
+    echo "Error: TensorBoard run ID not provided."
+    exit 1
+fi
+
+TB_RUN="$1"
 
 HYDRA_MULTIRUN_BASE_DIR="multirun/"
 
