@@ -28,13 +28,15 @@ if [[ -n "$MATCHING_LOG_FILE" ]]; then
   SUBMITIT_LOG_DIR=$(dirname "$MATCHING_LOG_FILE")
   MULTIRUN_TIMESTAMP_DIR=$(dirname "$(dirname "$SUBMITIT_LOG_DIR")")
 
-  # Extract the task ID from the log filename (e.g., from 1348727_0_0_log.out -> 0)
+  # Extract the task ID from the log filename (e.g., from 1348727_1_0_log.out -> 1)
   LOG_FILENAME=$(basename "$MATCHING_LOG_FILE")
   # Remove the suffix _log.out
   LOG_BASENAME=${LOG_FILENAME%_log.out}
-  # Get the part after the last underscore (this should be the task ID)
-  TASK_ID=${LOG_BASENAME##*_}
-
+  # Split the basename by underscores
+  IFS='_' read -ra PARTS <<< "$LOG_BASENAME"
+  # The task ID is the second-to-last part
+  TASK_ID=${PARTS[-2]}
+  
   # Construct the path to the actual Hydra run directory
   HYDRA_RUN_DIR="$MULTIRUN_TIMESTAMP_DIR/$TASK_ID"
 
