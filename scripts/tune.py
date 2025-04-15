@@ -18,32 +18,20 @@ from omegaconf import DictConfig, OmegaConf
 STORAGE_URL = "sqlite:///my_hpo_study_njobs.db"
 STUDY_NAME = "hpo_study_njobs_v1" # Choose a descriptive name
 
+SEEDS=[1,2,3,4,5]
+ENVS=[
+    # TODO add which we want to tune on 
+    "navix/four_rooms",
+    "navix/four_rooms_7x7",
+    "navix/four_rooms_9x9",
+    "navix/four_rooms_11x11",
+    "navix/four_rooms_13x13",
+]
+
 # --- Evaluation Function ---
 # This is the function that will actually be run on the SLURM nodes.
 # It should take parameters directly and return the objective value.
 # It should NOT contain Optuna or Submitit logic.
-def my_function_on_node(x, y):
-    """
-    Example function to be evaluated by SLURM. Replace with your actual logic.
-    Takes parameters directly, returns a single objective value (float).
-    """
-    pid = os.getpid()
-    print(f"SLURM Worker (PID {pid}): Evaluating x={x:.4f}, y={y:.4f}", flush=True)
-    # Simulate work - replace with your actual computation
-    time.sleep(max(1, int(abs(x)))) # Example sleep time
-    result = -(x**2) + y  # Example objective: Maximize this
-    print(f"SLURM Worker (PID {pid}): Finished x={x:.4f}, y={y:.4f}, result={result:.4f}", flush=True)
-    return result
-
-SEEDS=[1,2,3,4,5]
-ENVS=[
-    # TODO add which we want to tune on 
-    "navix/door_key_16x16",
-    "navix/door_key_8x8",
-    "navix/four_rooms",
-    "navix/four_rooms_9x9",
-    "navix/empty_5x5",
-]
 def run_job_on_node(num_envs):
     # TODO check if we can pmap instead of looping!
     total_return = 0
@@ -96,8 +84,8 @@ SLURM_MEM_GB = 5            # TODO set to 5
 SLURM_GPUS_PER_NODE = 1     # TODO Set to >0 if your function needs GPUs
 
 # --- Optimization Parameters ---
-N_PARALLEL_JOBS = 10  # How many Optuna trials/processes/SLURM jobs to run concurrently TODO ideally 10 because thats queue size. 
-TOTAL_TRIALS = 50    # Total number of trials to run for the study TODO 500?
+N_PARALLEL_JOBS = 5  # How many Optuna trials/processes/SLURM jobs to run concurrently TODO ideally 10 because thats queue size. 
+TOTAL_TRIALS = 20    # Total number of trials to run for the study TODO 500?
 
 # ==============================================================================
 # Optuna Objective Function (Synchronous)
@@ -114,7 +102,7 @@ def objective(trial):
     # 1. Suggest hyperparameters
     # x = trial.suggest_float('x', -10, 10)
     # y = trial.suggest_float('y', -10, 10)
-    num_envs = trial.suggest_int('num_envs', 2**6, 2**12, log=True)
+    num_envs = 2 ** trial.suggest_int('num_envs_exp', 5, 15)
 
     # Get identifiers for logging
     trial_number = trial.number
@@ -177,8 +165,6 @@ def objective(trial):
 # ==============================================================================
 
 if __name__ == "__main__":
-    # run_job_on_node(6) # TODO this doesn't work yet (hydra)
-    # breakpoint()
     print(f"Starting Optuna HPO script.")
     print(f"  Study Name: {STUDY_NAME}")
     print(f"  Storage: {STORAGE_URL}")
@@ -190,12 +176,16 @@ if __name__ == "__main__":
     os.makedirs(SLURM_LOG_FOLDER_BASE, exist_ok=True)
     print(f"  SLURM logs will be stored under ./{SLURM_LOG_FOLDER_BASE}/")
 
+    # --- Instantiate the QMCSampler ---
+    qmc_sampler = optuna.samplers.QMCSampler(seed=42) 
     # --- Create or load the study using the persistent storage ---
+    # --- Pass the instantiated sampler using the 'sampler' argument ---
     study = optuna.create_study(
         storage=STORAGE_URL,
         study_name=STUDY_NAME,
         direction="maximize",   # or "minimize" depending on your objective
-        load_if_exists=True     # Allows resuming if the script is interrupted
+        load_if_exists=True,    # Allows resuming if the script is interrupted
+        sampler=qmc_sampler     # <--- PASS THE SAMPLER HERE
     )
 
     # --- Run the optimization loop ---
