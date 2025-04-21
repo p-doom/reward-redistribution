@@ -1,4 +1,5 @@
 import optuna
+import json
 import submitit
 import time
 import os  # For getting process ID for logging
@@ -15,10 +16,10 @@ from omegaconf import DictConfig, OmegaConf
 # If running n_jobs on a single machine, a local path is fine.
 # If workers might run on different cluster nodes, use a path on a
 # shared network filesystem (e.g., NFS home directory).
-STORAGE_URL = "sqlite:///my_hpo_study_njobs.db"
-STUDY_NAME = "hpo_study_njobs_v1" # Choose a descriptive name
+STORAGE_URL = "sqlite:///my_hpo_study_njobs_vanilla_v2.db"
+STUDY_NAME = "hpo_study_njobs_vanilla_v2" # Choose a descriptive name
 
-SEEDS=[1,2,3,4,5]
+SEEDS=[1,2,3]#,4,5]
 ENVS=[
     # TODO add which we want to tune on 
     "navix/four_rooms",
@@ -32,10 +33,44 @@ ENVS=[
 # This is the function that will actually be run on the SLURM nodes.
 # It should take parameters directly and return the objective value.
 # It should NOT contain Optuna or Submitit logic.
-def run_job_on_node(num_envs):
+def _test_cfg_on_node(overrides_dict):
+    total_return = 0
+    num_runs = 0
+
+    for seed in SEEDS:
+        with hydra.initialize(
+            config_path="../stoix/configs/default/anakin",
+            version_base="1.2"):
+            cfg = hydra.compose(
+                config_name="default_ff_ppo",
+                overrides=[
+                    "env=navix/empty_5x5",
+                    f"arch.seed={seed}",
+                    "logger.use_tb=true",
+                    # "system.redistribute_reward_implicit=true"
+                ] + [f"{key}={value}" for key, value in overrides_dict.items()]
+            )
+
+            print("\n--- Calling train_model function ---")
+            final_absolute_return = ppo.hydra_entry_point(cfg)  
+            print("--- train_model function finished ---")
+
+            total_return += final_absolute_return
+            num_runs += 1
+
+    average_return = total_return / num_runs
+    print(f"\nAverage final_absolute_return over all runs: {average_return}")
+    return average_return
+
+def run_job_on_node(overrides_dict):
     # TODO check if we can pmap instead of looping!
     total_return = 0
     num_runs = 0
+
+    # sanity check if this config is actually good:
+    test_run_return = _test_cfg_on_node(overrides_dict)
+    if test_run_return < 0.6: # very gracious. it should actually converge to 1.
+        return -1.
 
     for seed in SEEDS:
         for env in ENVS:
@@ -50,8 +85,10 @@ def run_job_on_node(num_envs):
                     overrides=[
                         f"env={env}",
                         f"arch.seed={seed}",
-                        f"arch.total_num_envs={num_envs}"
-                    ]
+                        "logger.use_tb=true",
+                        "arch.total_timesteps=3e7",
+                        # "system.redistribute_reward_implicit=true"
+                    ] + [f"{key}={value}" for key, value in overrides_dict.items()]
                 )
 
                 # Optional: Print the composed config to verify
@@ -60,7 +97,7 @@ def run_job_on_node(num_envs):
 
                 # 4. Call your function directly with the composed config
                 print("\n--- Calling train_model function ---")
-                final_absolute_return = ppo.hydra_entry_point(cfg) # TODO figure out a way to pass num_envs in the config.  
+                final_absolute_return = ppo.hydra_entry_point(cfg)  
                 print("--- train_model function finished ---")
 
                 # 5. Use the returned value
@@ -77,15 +114,18 @@ def run_job_on_node(num_envs):
 
 # --- Submitit / SLURM Configuration ---
 SLURM_PARTITION = "NORMAL" # <-- partition on cremers cluster 
-SLURM_LOG_FOLDER_BASE = "log_slurm_njobs" # Base directory for SLURM logs
+SLURM_LOG_FOLDER_BASE = "log_slurm_njobs_vanilla_v2" # Base directory for SLURM logs
 SLURM_TIMEOUT_MIN = 120     # TODO Max time for one evaluation job (set to 2h)
-SLURM_CPUS_PER_TASK = 4     # TODO set to 4
+SLURM_CPUS_PER_TASK = 5     # TODO set to 4
 SLURM_MEM_GB = 5            # TODO set to 5
 SLURM_GPUS_PER_NODE = 1     # TODO Set to >0 if your function needs GPUs
+SLURM_NODELIST = "node1,node3,node4,node5,node6,node7,node8,node9,node10,node11,node12,node13,node14,node15,node16,node17,node18,node19,node20"
+
+
 
 # --- Optimization Parameters ---
 N_PARALLEL_JOBS = 5  # How many Optuna trials/processes/SLURM jobs to run concurrently TODO ideally 10 because thats queue size. 
-TOTAL_TRIALS = 20    # Total number of trials to run for the study TODO 500?
+TOTAL_TRIALS = 500    # Total number of trials to run for the study TODO 500?
 
 # ==============================================================================
 # Optuna Objective Function (Synchronous)
@@ -100,21 +140,28 @@ def objective(trial):
     blockingly for the result, and returns it.
     """
     # 1. Suggest hyperparameters
-    # x = trial.suggest_float('x', -10, 10)
-    # y = trial.suggest_float('y', -10, 10)
-    num_envs = 2 ** trial.suggest_int('num_envs_exp', 5, 15)
+    overrides = {
+       "system.actor_lr": trial.suggest_float("actor_lr", 1e-5, 1e-2, log=True),
+       "system.critic_lr": trial.suggest_float("critic_lr", 1e-5, 1e-2, log=True),
+       "system.clip_eps": trial.suggest_float("clip_eps", 0.1, 0.5),
+       "system.ent_coef": trial.suggest_float("ent_coef", 1e-10, 1e-2, log=True),
+       "system.vf_coef": trial.suggest_float("vf_coef", 0.3, 2.0),
+       "system.max_grad_norm": trial.suggest_float("max_grad_norm", 0.1, 5.0)
+    }
 
     # Get identifiers for logging
     trial_number = trial.number
     process_id = os.getpid()
 
     # print(f"Optuna Process PID {process_id} (Trial {trial_number}): Starting objective. Params: x={x:.4f}, y={y:.4f}", flush=True)
-    print(f"Optuna Process PID {process_id} (Trial {trial_number}): Starting objective. Params: num_envs={num_envs}", flush=True)
+    print(f"Optuna Process PID {process_id} (Trial {trial_number}): Starting objective. Params: \n{overrides}", flush=True)
+
 
 
     # 2. Configure submitit for this specific trial
     # Create a unique log folder for this trial's SLURM job
-    log_folder = os.path.join(SLURM_LOG_FOLDER_BASE, f"trial_{trial_number}_%j") # %j = SLURM Job ID
+    log_folder = os.path.join(SLURM_LOG_FOLDER_BASE, f"trial_{trial_number}_vanilla") # %j = SLURM Job ID
+    os.makedirs(log_folder, exist_ok=True)
     executor = submitit.AutoExecutor(folder=log_folder)
     executor.update_parameters(
         timeout_min=SLURM_TIMEOUT_MIN,
@@ -122,14 +169,15 @@ def objective(trial):
         cpus_per_task=SLURM_CPUS_PER_TASK,
         gpus_per_node=SLURM_GPUS_PER_NODE,
         mem_gb=SLURM_MEM_GB,
-        name=f"optuna_{STUDY_NAME}_t{trial_number}" # Unique SLURM job name
+        name=f"optuna_{STUDY_NAME}_t{trial_number}", # Unique SLURM job name
+        slurm_additional_parameters={"nodelist": SLURM_NODELIST} # Add nodelist
     )
+
 
     # 3. Submit the evaluation function to SLURM
     print(f"Optuna Process PID {process_id} (Trial {trial_number}): Submitting SLURM job.", flush=True)
     # Pass the parameters directly to the function defined above
-    # job = executor.submit(my_function_on_node, x, y) # TODO this works
-    job = executor.submit(run_job_on_node, num_envs) # TODO this doesn't work
+    job = executor.submit(run_job_on_node, overrides)
     print(f"Optuna Process PID {process_id} (Trial {trial_number}): Submitted SLURM job {job.job_id}. Waiting blockingly...", flush=True)
 
     # 4. Wait BLOCKINGLY for the SLURM job to finish
@@ -137,6 +185,13 @@ def objective(trial):
         # job.result() blocks THIS Optuna process until the SLURM job is done.
         result = job.result() # This will contain the return value of my_function_on_node
         print(f"Optuna Process PID {process_id} (Trial {trial_number}): Job {job.job_id} completed successfully. Result: {result:.4f}", flush=True)
+        # Define the path for the JSON file
+        json_file_path = os.path.join(log_folder, "overrides.json")
+
+        # Dump the overrides dictionary into a JSON file
+        with open(json_file_path, 'w') as json_file:
+            json.dump(overrides, json_file, indent=4)
+        print(f"Optuna Process PID {process_id} (Trial {trial_number}): Overrides dumped to {json_file_path}", flush=True)
         # 5. Return the numerical result to Optuna
         return result
 
