@@ -22,3 +22,4 @@ redistribute_reward_implicit: False # Whether to implicitly redistribute episodi
 disable_autoreset: True # Whether to disable Stoix-level autoresetting of environments (on env termination during rollout)
 use_mc_returns_ae: False # Whether to use Monte-Carlo returns for advantage estimation
 bootstrap_on_truncation: False # Whether to use value-bootstrapping on truncated trajectories (episode ending due to max_steps)
+timestep_informed_critic: False # Whether we pass the timestep as an input to the value network

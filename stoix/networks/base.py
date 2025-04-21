@@ -10,7 +10,7 @@ import numpy as np
 from flax import linen as nn
 
 from stoix.base_types import Observation, RNNObservation
-from stoix.networks.inputs import ObservationInput
+from stoix.networks.inputs import ObservationInput, ObservationTimestepInput
 from stoix.networks.utils import parse_rnn_cell
 
 
@@ -44,6 +44,22 @@ class FeedForwardCritic(nn.Module):
         obs_embedding = self.input_layer(observation)
         obs_embedding = self.torso(obs_embedding)
         critic_output = self.critic_head(obs_embedding)
+
+        return critic_output
+
+class FeedForwardTimestepCritic(nn.Module):
+    """Feedforward Critic Network that also takes timestep as input."""
+
+    critic_head: nn.Module
+    torso: nn.Module
+    input_layer: nn.Module = ObservationTimestepInput()
+
+    @nn.compact
+    def __call__(self, observation: Observation, timestep: chex.Array) -> chex.Array:
+
+        embedding = self.input_layer(observation, timestep)
+        embedding = self.torso(embedding)
+        critic_output = self.critic_head(embedding)
 
         return critic_output
 

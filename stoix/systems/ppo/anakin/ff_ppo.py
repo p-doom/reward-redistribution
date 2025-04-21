@@ -26,6 +26,7 @@ from stoix.base_types import (
 from stoix.evaluator import evaluator_setup, get_distribution_act_fn
 from stoix.networks.base import FeedForwardActor as Actor
 from stoix.networks.base import FeedForwardCritic as Critic
+from stoix.networks.base import FeedForwardTimestepCritic as TimestepCritic
 from stoix.systems.ppo.ppo_types import PPOTransition
 from stoix.utils import make_env as environments
 from stoix.utils.checkpointing import Checkpointer
@@ -418,7 +419,7 @@ def learner_setup(
     critic_head = hydra.utils.instantiate(config.network.critic_network.critic_head)
 
     actor_network = Actor(torso=actor_torso, action_head=actor_action_head)
-    critic_network = Critic(torso=critic_torso, critic_head=critic_head)
+    critic_network = Critic(torso=critic_torso, critic_head=critic_head) if config.system.timestep_informed_critic else Critic(torso=critic_torso, critic_head=critic_head)
 
     actor_lr = make_learning_rate(
         config.system.actor_lr, config, config.system.epochs, config.system.num_minibatches

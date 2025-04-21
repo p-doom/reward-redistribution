@@ -22,6 +22,29 @@ class ObservationInput(nn.Module):
         observation = observation.agent_view
         return observation
 
+class ObservationTimestepInput(nn.Module):
+    """Observation and Timestep Input."""
+
+    @nn.compact
+    def __call__(self, observation: Observation, timestep: chex.Array) -> chex.Array:
+        agent_view = observation.agent_view
+        # Ensure timestep has the same batch dimension and an added feature dimension
+        if timestep.ndim == 1:
+            timestep = jnp.expand_dims(timestep, axis=-1)
+        # Ensure timestep is broadcastable to the agent_view's shape
+        # This assumes agent_view is (batch_size, features) or similar
+        # and timestep is (batch_size, 1)
+        # If agent_view has more dims (e.g., sequence), broadcasting might be needed differently
+        # For simplicity, assuming typical MLP input shapes
+        if agent_view.ndim > 2 and timestep.ndim == 2:
+             # Example: agent_view is (batch, seq_len, features), timestep is (batch, 1)
+             # We might want to broadcast timestep to (batch, seq_len, 1)
+             timestep = jnp.expand_dims(timestep, axis=1)
+             timestep = jnp.repeat(timestep, agent_view.shape[1], axis=1)
+
+
+        x = jnp.concatenate([agent_view, timestep], axis=-1)
+        return x
 
 class ObservationActionInput(nn.Module):
     """Observation and Action Input."""
