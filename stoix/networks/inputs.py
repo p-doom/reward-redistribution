@@ -26,8 +26,9 @@ class ObservationTimestepInput(nn.Module):
     """Observation and Timestep Input."""
 
     @nn.compact
-    def __call__(self, observation: Observation, timestep: chex.Array) -> chex.Array:
+    def __call__(self, observation: Observation) -> chex.Array:
         agent_view = observation.agent_view
+        timestep = observation.step_count
         # Ensure timestep has the same batch dimension and an added feature dimension
         if timestep.ndim == 1:
             timestep = jnp.expand_dims(timestep, axis=-1)

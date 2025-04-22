@@ -25,6 +25,7 @@ from stoix.base_types import (
 )
 from stoix.evaluator import evaluator_setup, get_distribution_act_fn
 from stoix.networks.base import FeedForwardActor as Actor
+from stoix.networks.base import FeedForwardTimestepActor as TimestepActor
 from stoix.networks.base import FeedForwardCritic as Critic
 from stoix.networks.base import FeedForwardTimestepCritic as TimestepCritic
 from stoix.systems.ppo.ppo_types import PPOTransition
@@ -132,11 +133,29 @@ def get_learner_fn(
         trajectory_length = traj_batch.done.shape[0] # type: ignore
 
         # For each trajectory (axis=1), find the episode ending (first of either done_- or truncation_index along time dimension (axis=0))
-        done_indices = jnp.argmax(traj_batch.done, axis=0)  # shape: (num_trajectories,)
-        done_indices = jnp.where(jnp.any(traj_batch.done, axis=0), done_indices, trajectory_length)
-        truncation_indices = jnp.argmax(traj_batch.truncated, axis=0) # shape: (num_trajectories,)
-        truncation_indices = jnp.where(jnp.any(traj_batch.truncated, axis=0), truncation_indices, trajectory_length)
+        # done_indices = jnp.argmax(traj_batch.done, axis=0)  # shape: (num_trajectories,)
+        # done_indices = jnp.where(jnp.any(traj_batch.done, axis=0), done_indices, trajectory_length)
+        # truncation_indices = jnp.argmax(traj_batch.truncated, axis=0) # shape: (num_trajectories,)
+        # truncation_indices = jnp.where(jnp.any(traj_batch.truncated, axis=0), truncation_indices, trajectory_length)
+        # For each trajectory (axis=1), find the episode ending (first of either done_- or truncation_index along time dimension (axis=0))
+        def _get_episode_indices(index_batch, trajectory_length):
+            return jnp.where(jnp.any(index_batch, axis=0), jnp.argmax(index_batch, axis=0), trajectory_length)
 
+        output_shape = traj_batch.done.shape[1]  # Assuming the output is a 1D array with length equal to the number of trajectories
+        # Use jax.pure_callback with the correct output type and arguments
+        done_indices = jax.pure_callback(
+            _get_episode_indices,
+            jax.ShapeDtypeStruct((output_shape,), jnp.int32),  # Specify the shape and dtype of the output
+            traj_batch.done,
+            trajectory_length
+        )
+
+        truncation_indices = jax.pure_callback(
+            _get_episode_indices,
+            jax.ShapeDtypeStruct((output_shape,), jnp.int32),  # Specify the shape and dtype of the output
+            traj_batch.truncated,
+            trajectory_length
+        )
         episode_termination_indices = jnp.minimum(done_indices, truncation_indices)
 
         # Create mask for non-valid transitions (time > done_index for each trajectory)
@@ -303,6 +322,13 @@ def get_learner_fn(
                     (critic_grads, critic_loss_info), axis_name="device"
                 )
 
+                squared_actor_grads = jax.tree_util.tree_map(lambda x: jnp.sum(x**2), actor_grads)
+                sum_squared_actor_grads = jax.tree_util.tree_reduce(lambda x, y: x + y, squared_actor_grads, 0.0)
+                global_actor_grad_norm = jnp.sqrt(sum_squared_actor_grads)
+                squared_critic_grads = jax.tree_util.tree_map(lambda x: jnp.sum(x**2), critic_grads)
+                sum_squared_critic_grads = jax.tree_util.tree_reduce(lambda x, y: x + y, squared_critic_grads, 0.0)
+                global_critic_grad_norm = jnp.sqrt(sum_squared_critic_grads)
+
                 # UPDATE ACTOR PARAMS AND OPTIMISER STATE
                 actor_updates, actor_new_opt_state = actor_update_fn(
                     actor_grads, opt_states.actor_opt_state
@@ -323,6 +349,8 @@ def get_learner_fn(
                 loss_info = {
                     **actor_loss_info,
                     **critic_loss_info,
+                    "global_actor_grad_norm": global_actor_grad_norm ,
+                    "global_critic_grad_norm": global_critic_grad_norm
                 }
                 return (new_params, new_opt_state), loss_info
 
@@ -418,8 +446,8 @@ def learner_setup(
     critic_torso = hydra.utils.instantiate(config.network.critic_network.pre_torso)
     critic_head = hydra.utils.instantiate(config.network.critic_network.critic_head)
 
-    actor_network = Actor(torso=actor_torso, action_head=actor_action_head)
-    critic_network = Critic(torso=critic_torso, critic_head=critic_head) if config.system.timestep_informed_critic else Critic(torso=critic_torso, critic_head=critic_head)
+    actor_network = TimestepActor(torso=actor_torso, action_head=actor_action_head) if config.system.timestep_informed_actor else Actor(torso=actor_torso, action_head=actor_action_head)
+    critic_network = TimestepCritic(torso=critic_torso, critic_head=critic_head) if config.system.timestep_informed_critic else Critic(torso=critic_torso, critic_head=critic_head)
 
     actor_lr = make_learning_rate(
         config.system.actor_lr, config, config.system.epochs, config.system.num_minibatches
@@ -553,13 +581,13 @@ def run_experiment(_config: DictConfig) -> float:
     ), """Reward redistribution currently only supports single episodes per rollout. Technically,
     only partial rollouts are problematic. If you need multi-episode support, please open an
     issue at https://github.com/p-doom/reward-redistribution."""
-    assert (
-            config.system.disable_autoreset == config.env.kwargs.disable_autoreset
-    ), "Autoresetting must be disabled both at Stoix- and navix-level."
-    assert (
-        config.system.disable_autoreset and config.env.kwargs.disable_autoreset
-    ), """Autoresetting is not supported any more due to bugs in the upstream implementation. Further
-    information is available at https://github.com/p-doom/reward-redistribution/pull/10."""
+    # assert (
+            # config.system.disable_autoreset == config.env.kwargs.disable_autoreset
+    # ), "Autoresetting must be disabled both at Stoix- and navix-level."
+    # assert (
+        # config.system.disable_autoreset and config.env.kwargs.disable_autoreset
+    # ), """Autoresetting is not supported any more due to bugs in the upstream implementation. Further
+    # information is available at https://github.com/p-doom/reward-redistribution/pull/10."""
     assert (
         not config.system.disable_autoreset
         or (
@@ -634,7 +662,6 @@ def run_experiment(_config: DictConfig) -> float:
         t = int(steps_per_rollout * (eval_step + 1))
         episode_metrics, ep_completed = get_final_step_metrics(learner_output.episode_metrics)
         episode_metrics["steps_per_second"] = steps_per_rollout / elapsed_time
-
         # Separately log timesteps, actoring metrics and training metrics.
         logger.log({"timestep": t}, t, eval_step, LogEvent.MISC)
         if ep_completed:  # only log episode metrics if an episode was completed in the rollout.
@@ -647,6 +674,7 @@ def run_experiment(_config: DictConfig) -> float:
             config.system.epochs * config.system.num_minibatches
         )
         train_metrics["steps_per_second"] = opt_steps_per_eval / elapsed_time
+
         logger.log(train_metrics, t, eval_step, LogEvent.TRAIN)
 
         # Prepare for evaluation.

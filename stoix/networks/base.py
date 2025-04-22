@@ -47,6 +47,21 @@ class FeedForwardCritic(nn.Module):
 
         return critic_output
 
+class FeedForwardTimestepActor(nn.Module):
+    """Feedforward Actor Network that also takes timestep as input."""
+
+    action_head: nn.Module
+    torso: nn.Module
+    input_layer: nn.Module = ObservationTimestepInput()
+
+    @nn.compact
+    def __call__(self, observation: Observation) -> distrax.DistributionLike:
+
+        embedding = self.input_layer(observation)
+        embedding = self.torso(embedding)
+        return self.action_head(embedding)
+
+
 class FeedForwardTimestepCritic(nn.Module):
     """Feedforward Critic Network that also takes timestep as input."""
 
@@ -55,9 +70,9 @@ class FeedForwardTimestepCritic(nn.Module):
     input_layer: nn.Module = ObservationTimestepInput()
 
     @nn.compact
-    def __call__(self, observation: Observation, timestep: chex.Array) -> chex.Array:
+    def __call__(self, observation: Observation) -> chex.Array:
 
-        embedding = self.input_layer(observation, timestep)
+        embedding = self.input_layer(observation)
         embedding = self.torso(embedding)
         critic_output = self.critic_head(embedding)
 

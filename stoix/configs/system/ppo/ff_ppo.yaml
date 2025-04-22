@@ -23,3 +23,4 @@ disable_autoreset: True # Whether to disable Stoix-level autoresetting of enviro
 use_mc_returns_ae: False # Whether to use Monte-Carlo returns for advantage estimation
 bootstrap_on_truncation: False # Whether to use value-bootstrapping on truncated trajectories (episode ending due to max_steps)
 timestep_informed_critic: False # Whether we pass the timestep as an input to the value network
+timestep_informed_actor: False # Whether we pass the timestep as an input to the actor network
