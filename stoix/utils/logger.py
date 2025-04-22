@@ -241,7 +241,9 @@ class TensorboardLogger(BaseLogger):
 
     def __init__(self, cfg: DictConfig, unique_token: str) -> None:
         tb_exp_path = get_logger_path(cfg, "tensorboard")
-        tb_logs_path = os.path.join(cfg.logger.base_exp_path, f"{tb_exp_path}/{unique_token}")
+        log_session_id = uuid.uuid4()
+        tb_logs_path = os.path.join(cfg.logger.base_exp_path, f"{tb_exp_path}/{unique_token}_{log_session_id}")
+        print(tb_logs_path)
 
         self.logger = tensorboard_logger.Logger(tb_logs_path)
         self.log = self.logger.log_value

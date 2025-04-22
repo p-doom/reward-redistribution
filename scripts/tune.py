@@ -16,8 +16,8 @@ from omegaconf import DictConfig, OmegaConf
 # If running n_jobs on a single machine, a local path is fine.
 # If workers might run on different cluster nodes, use a path on a
 # shared network filesystem (e.g., NFS home directory).
-STORAGE_URL = "sqlite:///my_hpo_study_njobs_vanilla_v2.db"
-STUDY_NAME = "hpo_study_njobs_vanilla_v2" # Choose a descriptive name
+STORAGE_URL = "sqlite:///my_hpo_study_njobs_rr_v2.db"
+STUDY_NAME = "hpo_study_njobs_rr_v2" # Choose a descriptive name
 
 SEEDS=[1,2,3]#,4,5]
 ENVS=[
@@ -47,7 +47,9 @@ def _test_cfg_on_node(overrides_dict):
                     "env=navix/empty_5x5",
                     f"arch.seed={seed}",
                     "logger.use_tb=true",
-                    # "system.redistribute_reward_implicit=true"
+                    "system.timestep_informed_critic=true",
+                    "system.timestep_informed_actor=true",
+                    "system.redistribute_reward=true"
                 ] + [f"{key}={value}" for key, value in overrides_dict.items()]
             )
 
@@ -69,7 +71,7 @@ def run_job_on_node(overrides_dict):
 
     # sanity check if this config is actually good:
     test_run_return = _test_cfg_on_node(overrides_dict)
-    if test_run_return < 0.6: # very gracious. it should actually converge to 1.
+    if test_run_return < 0.7: # very gracious. it should actually converge to 1.
         return -1.
 
     for seed in SEEDS:
@@ -87,13 +89,11 @@ def run_job_on_node(overrides_dict):
                         f"arch.seed={seed}",
                         "logger.use_tb=true",
                         "arch.total_timesteps=3e7",
-                        # "system.redistribute_reward_implicit=true"
+                        "system.timestep_informed_critic=true",
+                        "system.timestep_informed_actor=true",
+                        "system.redistribute_reward=true"
                     ] + [f"{key}={value}" for key, value in overrides_dict.items()]
                 )
-
-                # Optional: Print the composed config to verify
-                # print("Composed Configuration in Caller:")
-                # print(OmegaConf.to_yaml(cfg))
 
                 # 4. Call your function directly with the composed config
                 print("\n--- Calling train_model function ---")
@@ -114,7 +114,7 @@ def run_job_on_node(overrides_dict):
 
 # --- Submitit / SLURM Configuration ---
 SLURM_PARTITION = "NORMAL" # <-- partition on cremers cluster 
-SLURM_LOG_FOLDER_BASE = "log_slurm_njobs_vanilla_v2" # Base directory for SLURM logs
+SLURM_LOG_FOLDER_BASE = "log_slurm_njobs_rr_v2" # Base directory for SLURM logs
 SLURM_TIMEOUT_MIN = 120     # TODO Max time for one evaluation job (set to 2h)
 SLURM_CPUS_PER_TASK = 5     # TODO set to 4
 SLURM_MEM_GB = 5            # TODO set to 5
@@ -124,7 +124,7 @@ SLURM_NODELIST = "node1,node3,node4,node5,node6,node7,node8,node9,node10,node11,
 
 
 # --- Optimization Parameters ---
-N_PARALLEL_JOBS = 5  # How many Optuna trials/processes/SLURM jobs to run concurrently TODO ideally 10 because thats queue size. 
+N_PARALLEL_JOBS = 10  # How many Optuna trials/processes/SLURM jobs to run concurrently TODO ideally 10 because thats queue size. 
 TOTAL_TRIALS = 500    # Total number of trials to run for the study TODO 500?
 
 # ==============================================================================
@@ -143,7 +143,7 @@ def objective(trial):
     overrides = {
        "system.actor_lr": trial.suggest_float("actor_lr", 1e-5, 1e-2, log=True),
        "system.critic_lr": trial.suggest_float("critic_lr", 1e-5, 1e-2, log=True),
-       "system.clip_eps": trial.suggest_float("clip_eps", 0.1, 0.5),
+       "system.clip_eps": trial.suggest_float("clip_eps", 0.01, 0.5),
        "system.ent_coef": trial.suggest_float("ent_coef", 1e-10, 1e-2, log=True),
        "system.vf_coef": trial.suggest_float("vf_coef", 0.3, 2.0),
        "system.max_grad_norm": trial.suggest_float("max_grad_norm", 0.1, 5.0)
@@ -160,7 +160,7 @@ def objective(trial):
 
     # 2. Configure submitit for this specific trial
     # Create a unique log folder for this trial's SLURM job
-    log_folder = os.path.join(SLURM_LOG_FOLDER_BASE, f"trial_{trial_number}_vanilla") # %j = SLURM Job ID
+    log_folder = os.path.join(SLURM_LOG_FOLDER_BASE, f"trial_{trial_number}_rr") # %j = SLURM Job ID
     os.makedirs(log_folder, exist_ok=True)
     executor = submitit.AutoExecutor(folder=log_folder)
     executor.update_parameters(
