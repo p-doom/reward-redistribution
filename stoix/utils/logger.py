@@ -243,6 +243,8 @@ class TensorboardLogger(BaseLogger):
         tb_exp_path = get_logger_path(cfg, "tensorboard")
         tb_logs_path = os.path.join(cfg.logger.base_exp_path, f"{tb_exp_path}/{unique_token}")
 
+        logging.info(f"{Fore.YELLOW}{Style.BRIGHT}TensorBoard logs path: {tb_logs_path}{Style.RESET_ALL}")
+
         self.logger = tensorboard_logger.Logger(tb_logs_path)
         self.log = self.logger.log_value
 
