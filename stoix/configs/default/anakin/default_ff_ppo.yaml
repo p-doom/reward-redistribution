@@ -9,3 +9,5 @@ defaults:
 hydra:
   searchpath:
     - file://stoix/configs
+  run:
+    dir: ./outputs/${now:%Y-%m-%d}/${now:%H-%M-%S-%f}
